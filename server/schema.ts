@@ -27,6 +27,12 @@ export async function initDatabase() {
   await pool.query(
     'ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS meta_diaria_faturamento NUMERIC(10,2) NOT NULL DEFAULT 5800.00'
   );
+  await pool.query(
+    'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0'
+  );
+  await pool.query(
+    'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS bloqueado_ate TIMESTAMP WITH TIME ZONE'
+  );
 
   // Garante registro padrão em dados_empresa
   await pool.query(`

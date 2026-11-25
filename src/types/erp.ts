@@ -100,6 +100,9 @@ export interface SystemUser {
   lastAccess: string;
   pin?: string;
   permissions?: Record<string, boolean>;
+  isBlocked?: boolean;
+  failedAttempts?: number;
+  blockedUntil?: string | null;
 }
 
 export interface CompanyData {

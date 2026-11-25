@@ -61,7 +61,8 @@ export function PdvPage() {
   const [pinReason, setPinReason] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
 
-  const openShift = shifts.find((s) => s.status === 'Aberto');
+  const todayBr = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const openShift = shifts.find((s) => s.status === 'Aberto' && s.openedAt?.startsWith(todayBr));
 
   useEffect(() => {
     if (feedback?.type !== 'err') return;
@@ -164,6 +165,13 @@ export function PdvPage() {
 
   const handleFinalizeSale = useCallback(async (overridePin?: string) => {
     if (cart.length === 0 || submitting) return;
+    if (!openShift) {
+      setFeedback({
+        type: 'err',
+        text: 'Nenhum caixa do dia aberto. Abra o caixa de hoje antes de realizar vendas.',
+      });
+      return;
+    }
     setSubmitting(true);
     setFeedback(null);
     setPinError(null);
@@ -268,6 +276,7 @@ export function PdvPage() {
   }, [
     cart,
     submitting,
+    openShift,
     paymentMethod,
     discountVal,
     subtotal,

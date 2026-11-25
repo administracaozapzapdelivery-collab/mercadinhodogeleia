@@ -1,24 +1,28 @@
 import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
-import { PasswordInput } from '../components/ui/SharedUI';
+import { Modal, PasswordInput } from '../components/ui/SharedUI';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { login } = useErp();
 
   const [email, setEmail] = useState('everaldozs@gmail.com');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
   const [maxAttempts, setMaxAttempts] = useState<number>(3);
   const [submitting, setSubmitting] = useState(false);
 
-  const redirectTo = searchParams.get('redirect') || '/dashboard';
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [adminPin, setAdminPin] = useState('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
 
   async function handleLogin(targetPath: string) {
     setErrorMsg(null);
+    setSuccessMsg(null);
     setSubmitting(true);
     try {
       await login(email, password);
@@ -38,9 +42,36 @@ export function LoginPage() {
     }
   }
 
+  async function handleUnlockWithPin(e: React.FormEvent) {
+    e.preventDefault();
+    setUnlockError(null);
+    setUnlocking(true);
+    try {
+      const res = await fetch('/api/auth/unlock-with-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, adminPin }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUnlockError(body.error || 'Erro ao validar PIN.');
+        return;
+      }
+      setUnlockModalOpen(false);
+      setAdminPin('');
+      setErrorMsg(null);
+      setRemainingAttempts(null);
+      setSuccessMsg(`Acesso desbloqueado por ${body.unlockedBy}. Digite sua senha e entre.`);
+    } catch {
+      setUnlockError('Falha de comunicação com o servidor.');
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    void handleLogin(redirectTo);
+    void handleLogin('/dashboard');
   }
 
   return (
@@ -57,8 +88,15 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="p-space-xl space-y-space-md">
+          {successMsg && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2 font-label-md font-bold">
+              <span className="material-symbols-outlined text-[18px]">lock_open</span>
+              <span>{successMsg}</span>
+            </div>
+          )}
+
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-error-container text-on-error-container space-y-1">
+            <div className="p-3 rounded-lg bg-error-container text-on-error-container space-y-2">
               <div className="flex items-center gap-2 font-label-md font-bold">
                 <span className="material-symbols-outlined text-[18px]">error</span>
                 <span>{errorMsg}</span>
@@ -69,6 +107,22 @@ export function LoginPage() {
                     ? `Você ainda tem ${remainingAttempts} ${remainingAttempts === 1 ? 'tentativa restante' : 'tentativas restantes'} (de ${maxAttempts}).`
                     : `0 de ${maxAttempts} tentativas restantes. Aguarde alguns minutos para tentar novamente.`}
                 </p>
+              )}
+              {remainingAttempts === 0 && (
+                <div className="pl-6 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnlockError(null);
+                      setAdminPin('');
+                      setUnlockModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-label-sm font-bold shadow-sm transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">lock_open</span>
+                    <span>Desbloquear com PIN do Gestor</span>
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -121,6 +175,54 @@ export function LoginPage() {
           </button>
         </form>
       </div>
+
+      <Modal
+        open={unlockModalOpen}
+        title="Desbloquear Acesso com PIN"
+        onClose={() => setUnlockModalOpen(false)}
+      >
+        <form onSubmit={handleUnlockWithPin} className="space-y-4">
+          <p className="text-body-sm text-on-surface-variant">
+            Informe o PIN de um <strong>Administrador</strong> ou <strong>Gerente</strong> para liberar o acesso de{' '}
+            <strong>{email}</strong>.
+          </p>
+          {unlockError && (
+            <div className="p-2.5 rounded-lg bg-error-container text-on-error-container font-label-sm font-bold">
+              {unlockError}
+            </div>
+          )}
+          <div>
+            <label htmlFor="unlock-admin-pin" className="block font-label-md mb-1">
+              PIN do Gestor / Administrador
+            </label>
+            <PasswordInput
+              id="unlock-admin-pin"
+              value={adminPin}
+              onChange={(e) => setAdminPin(e.target.value)}
+              placeholder="Digite o PIN (ex: 4 dígitos)"
+              required
+              autoFocus
+              className="w-full h-10 px-3 rounded-lg border border-slate-200"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setUnlockModalOpen(false)}
+              className="px-4 py-2 rounded-lg bg-surface-container font-label-md font-bold"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={unlocking}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-label-md font-bold"
+            >
+              {unlocking ? 'Validando...' : 'Confirmar Desbloqueio'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

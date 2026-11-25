@@ -17,7 +17,7 @@ const permissionLabels: { key: string; label: string }[] = [
 
 export function UsersPage() {
   const navigate = useNavigate();
-  const { users, updateUser, deleteUser } = useErp();
+  const { users, updateUser, deleteUser, unlockUser } = useErp();
 
   const [viewUser, setViewUser] = useState<SystemUser | null>(null);
   const [editUser, setEditUser] = useState<SystemUser | null>(null);
@@ -160,10 +160,34 @@ export function UsersPage() {
                 </td>
                 <td className="px-space-lg py-3 text-body-sm">{u.lastAccess}</td>
                 <td className="px-space-lg py-3">
-                  <StatusBadge label={u.status} tone={u.status === 'Ativo' ? 'success' : 'neutral'} />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <StatusBadge label={u.status} tone={u.status === 'Ativo' ? 'success' : 'neutral'} />
+                    {u.isBlocked && (
+                      <StatusBadge
+                        label={u.blockedUntil ? `Bloqueado até ${u.blockedUntil}` : 'Bloqueado'}
+                        tone="danger"
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="px-space-lg py-3">
                   <div className="flex items-center justify-end gap-1.5">
+                    {u.isBlocked && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await unlockUser(u.id);
+                          setNotice(`Usuário "${u.name}" desbloqueado com sucesso.`);
+                          setTimeout(() => setNotice(null), 4000);
+                        }}
+                        title="Desbloquear acesso"
+                        aria-label={`Desbloquear ${u.name}`}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 font-label-sm font-bold transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">lock_open</span>
+                        <span>Desbloquear</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setViewUser(u)}

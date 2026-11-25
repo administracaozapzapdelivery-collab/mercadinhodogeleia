@@ -77,17 +77,20 @@ salesAndPdvRouter.post('/sales', requireAuth, async (req, res, next) => {
     const cfg = cfgRes.rows[0];
 
     const openShiftRes = await client.query<{ id: number }>(
-      "SELECT id FROM caixas WHERE status = 'ABERTO' ORDER BY id DESC LIMIT 1"
+      `SELECT id FROM caixas
+       WHERE status = 'ABERTO'
+         AND (data_abertura AT TIME ZONE 'America/Sao_Paulo')::date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
+       ORDER BY id DESC LIMIT 1`
     );
     const caixaId = openShiftRes.rows[0]?.id;
 
-    if (cfg?.exigir_abertura_caixa && !caixaId) {
+    if (!caixaId) {
       await client.query('ROLLBACK');
-      res.status(400).json({ error: 'Nenhum turno de caixa aberto. Abra o caixa antes de vender.' });
+      res.status(400).json({ error: 'Nenhum caixa do dia aberto. Abra o caixa de hoje antes de realizar vendas.' });
       return;
     }
 
-    const activeCaixaId = caixaId ?? 1;
+    const activeCaixaId = caixaId;
     const activeOpId = req.user!.id;
     const formaDb = payMethodToDb[paymentMethod] ?? 'PIX';
 

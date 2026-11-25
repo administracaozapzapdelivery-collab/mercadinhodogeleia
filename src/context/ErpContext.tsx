@@ -71,6 +71,7 @@ interface ErpContextValue {
     user: Partial<SystemUser> & { active?: boolean; password?: string; pin?: string; permissions?: Record<string, boolean> }
   ) => Promise<void>;
   deleteUser: (id: string) => Promise<{ deleted?: boolean }>;
+  unlockUser: (id: string) => Promise<void>;
   sales: Sale[];
   addSale: (sale: Sale) => void;
   company: CompanyData | null;
@@ -283,6 +284,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     users,
     addUser: async (u) => {
       await apiPost('/api/users', u);
+      await refreshData();
+    },
+    unlockUser: async (id) => {
+      await apiPost(`/api/users/${id}/unlock`, {});
+      setUsers((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, isBlocked: false, failedAttempts: 0, blockedUntil: null } : item
+        )
+      );
       await refreshData();
     },
     updateUser: async (id, u) => {

@@ -182,8 +182,8 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
           cx.id::text AS id,
           'Caixa 0' || cx.numero_pdv AS register,
           u.nome AS operator,
-          TO_CHAR(cx.data_abertura, 'DD/MM/YYYY HH24:MI') AS "openedAt",
-          TO_CHAR(cx.data_fechamento, 'DD/MM/YYYY HH24:MI') AS "closedAt",
+          TO_CHAR(cx.data_abertura AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS "openedAt",
+          TO_CHAR(cx.data_fechamento AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS "closedAt",
           cx.valor_inicial::float AS "openingBalance",
           (cx.valor_sistema_dinheiro + cx.valor_sistema_digital)::float AS "totalSales",
           (cx.valor_inicial + cx.valor_sistema_dinheiro + cx.valor_sistema_digital)::float AS "expectedBalance",
@@ -206,7 +206,10 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
               CASE WHEN ativo THEN 'Ativo' ELSE 'Inativo' END AS status,
               COALESCE(TO_CHAR(ultimo_acesso, 'DD/MM/YYYY HH24:MI'), 'Recente') AS "lastAccess",
               '' AS pin,
-              permissoes_json AS permissions
+              permissoes_json AS permissions,
+              (bloqueado_ate IS NOT NULL AND bloqueado_ate > NOW()) AS "isBlocked",
+              COALESCE(tentativas_login, 0) AS "failedAttempts",
+              TO_CHAR(bloqueado_ate AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS "blockedUntil"
             FROM usuarios
             ORDER BY id DESC
           `)
@@ -215,7 +218,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         SELECT
           v.id::text AS id,
           v.numero_cupom AS cupom,
-          TO_CHAR(v.created_at, 'DD/MM/YYYY HH24:MI') AS date,
+          TO_CHAR(v.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS date,
           COALESCE(c.nome, 'Consumidor Final') AS customer,
           COALESCE((SELECT SUM(vi.quantidade)::int FROM venda_itens vi WHERE vi.venda_id = v.id), 1) AS "itemsCount",
           v.total::float AS total,

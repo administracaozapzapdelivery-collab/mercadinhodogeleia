@@ -4,6 +4,7 @@ import { pool } from '../db.ts';
 import { logAudit } from '../utils/audit.ts';
 import {
   createFailedAttemptTracker,
+  createRateLimiter,
   parsePositiveId,
   requireAuth,
   requireRole,
@@ -15,38 +16,54 @@ import {
 export const authAndUsersRouter = Router();
 
 const MAX_LOGIN_ATTEMPTS = 3;
-const loginTracker = createFailedAttemptTracker(MAX_LOGIN_ATTEMPTS, 15 * 60 * 1000);
+const unknownEmailTracker = createFailedAttemptTracker(MAX_LOGIN_ATTEMPTS, 15 * 60 * 1000);
+const pinUnlockLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Muitas tentativas de PIN para desbloqueio. Aguarde alguns minutos.',
+  keyPrefix: 'pin-unlock',
+});
 
-// 1. Login contra tabela usuarios
+// 1. Login contra tabela usuarios (bloqueio persistido no PostgreSQL)
 authAndUsersRouter.post('/auth/login', async (req, res) => {
   try {
-    const lockState = loginTracker.checkBlocked(req);
-    if (lockState.blocked) {
-      res.setHeader('Retry-After', String(lockState.retryAfterSec));
-      res.status(429).json({
-        error: 'Muitas tentativas incorretas. Acesso temporariamente bloqueado; aguarde alguns minutos.',
-        remainingAttempts: 0,
-        maxAttempts: MAX_LOGIN_ATTEMPTS,
-        retryAfterSec: lockState.retryAfterSec,
-      });
-      return;
-    }
-
     const { email, password } = req.body as { email?: string; password?: string };
     if (!email || !password) {
       res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
       return;
     }
 
-    const result = await pool.query(
-      `SELECT id, nome, email_login, senha_hash, pin_rapido, perfil, permissoes_json, ativo
+    const result = await pool.query<{
+      id: number;
+      nome: string;
+      email_login: string;
+      senha_hash: string;
+      perfil: UserRole;
+      permissoes_json: Record<string, boolean>;
+      ativo: boolean;
+      tentativas_login: number;
+      bloqueado_ate: Date | null;
+    }>(
+      `SELECT id, nome, email_login, senha_hash, perfil, permissoes_json, ativo,
+              COALESCE(tentativas_login, 0) AS tentativas_login, bloqueado_ate
        FROM usuarios WHERE email_login = $1 LIMIT 1`,
       [email.trim()]
     );
 
     const user = result.rows[0];
     if (!user || !user.ativo) {
-      const fail = loginTracker.recordFailure(req);
+      const lockState = unknownEmailTracker.checkBlocked(req);
+      if (lockState.blocked) {
+        res.setHeader('Retry-After', String(lockState.retryAfterSec));
+        res.status(429).json({
+          error: 'Muitas tentativas incorretas. Aguarde alguns minutos e tente novamente.',
+          remainingAttempts: 0,
+          maxAttempts: MAX_LOGIN_ATTEMPTS,
+          retryAfterSec: lockState.retryAfterSec,
+        });
+        return;
+      }
+      const fail = unknownEmailTracker.recordFailure(req);
       res.status(fail.blocked ? 429 : 401).json({
         error: fail.blocked
           ? 'Usuário não encontrado ou inativo. Limite de tentativas atingido; aguarde alguns minutos.'
@@ -57,21 +74,54 @@ authAndUsersRouter.post('/auth/login', async (req, res) => {
       return;
     }
 
+    const nowMs = Date.now();
+    const blockedUntilMs = user.bloqueado_ate ? new Date(user.bloqueado_ate).getTime() : 0;
+    if (blockedUntilMs > nowMs) {
+      const retryAfterSec = Math.ceil((blockedUntilMs - nowMs) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      res.status(429).json({
+        error: 'Usuário bloqueado por excesso de tentativas incorretas. Solicite o desbloqueio ao Administrador ou aguarde.',
+        remainingAttempts: 0,
+        maxAttempts: MAX_LOGIN_ATTEMPTS,
+        retryAfterSec,
+      });
+      return;
+    }
+
+    const currentAttempts = blockedUntilMs > 0 ? 0 : Number(user.tentativas_login ?? 0);
     const valid = await bcrypt.compare(password, user.senha_hash);
     if (!valid) {
-      const fail = loginTracker.recordFailure(req);
-      res.status(fail.blocked ? 429 : 401).json({
-        error: fail.blocked
-          ? 'Senha incorreta. Limite de 3 tentativas atingido; aguarde alguns minutos.'
+      const nextAttempts = currentAttempts + 1;
+      const blocked = nextAttempts >= MAX_LOGIN_ATTEMPTS;
+      const remainingAttempts = Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts);
+
+      if (blocked) {
+        await pool.query(
+          `UPDATE usuarios SET tentativas_login = $1, bloqueado_ate = NOW() + INTERVAL '15 minutes', updated_at = NOW() WHERE id = $2`,
+          [MAX_LOGIN_ATTEMPTS, user.id]
+        );
+      } else {
+        await pool.query(
+          `UPDATE usuarios SET tentativas_login = $1, bloqueado_ate = NULL, updated_at = NOW() WHERE id = $2`,
+          [nextAttempts, user.id]
+        );
+      }
+
+      res.status(blocked ? 429 : 401).json({
+        error: blocked
+          ? 'Senha incorreta. Usuário bloqueado após 3 tentativas; solicite o desbloqueio ao Administrador.'
           : 'Senha incorreta.',
-        remainingAttempts: fail.remainingAttempts,
+        remainingAttempts,
         maxAttempts: MAX_LOGIN_ATTEMPTS,
       });
       return;
     }
 
-    loginTracker.reset(req);
-    await pool.query('UPDATE usuarios SET ultimo_acesso = NOW() WHERE id = $1', [user.id]);
+    unknownEmailTracker.reset(req);
+    await pool.query(
+      'UPDATE usuarios SET tentativas_login = 0, bloqueado_ate = NULL, ultimo_acesso = NOW() WHERE id = $1',
+      [user.id]
+    );
 
     const token = signAuthToken({
       sub: String(user.id),
@@ -88,6 +138,50 @@ authAndUsersRouter.post('/auth/login', async (req, res) => {
       permissoes: user.permissoes_json,
       token,
     });
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+authAndUsersRouter.post('/auth/unlock-with-pin', pinUnlockLimiter, async (req, res) => {
+  try {
+    const { email, adminPin } = req.body as { email?: string; adminPin?: string };
+    const pinTrimmed = String(adminPin ?? '').trim();
+    if (!email || !pinTrimmed) {
+      res.status(400).json({ error: 'E-mail e PIN do Administrador/Gerente são obrigatórios.' });
+      return;
+    }
+
+    const authRes = await pool.query<{ id: number; nome: string }>(
+      `SELECT id, nome FROM usuarios
+       WHERE pin_rapido = $1 AND ativo = TRUE AND perfil IN ('ADMIN', 'GERENTE')
+       LIMIT 1`,
+      [pinTrimmed]
+    );
+    const authorizer = authRes.rows[0];
+    if (!authorizer) {
+      res.status(403).json({ error: 'PIN inválido ou usuário sem permissão de Administrador/Gerente.' });
+      return;
+    }
+
+    const targetRes = await pool.query<{ id: number }>(
+      'SELECT id FROM usuarios WHERE email_login = $1 LIMIT 1',
+      [email.trim()]
+    );
+    const targetUser = targetRes.rows[0];
+    if (targetUser) {
+      await pool.query(
+        'UPDATE usuarios SET tentativas_login = 0, bloqueado_ate = NULL, updated_at = NOW() WHERE id = $1',
+        [targetUser.id]
+      );
+      await logAudit(authorizer.id, 'DESBLOQUEOU_LOGIN_PIN', 'usuarios', targetUser.id, {
+        email: email.trim(),
+        unlockedBy: authorizer.nome,
+      });
+    }
+
+    unknownEmailTracker.reset(req);
+    res.json({ ok: true, unlockedBy: authorizer.nome });
   } catch (err) {
     res.status(500).json({ error: safeErrorMessage(err) });
   }
@@ -157,6 +251,24 @@ authAndUsersRouter.put('/users/:id', requireAuth, requireRole('ADMIN'), async (r
       ]
     );
     await logAudit(req.user!.id, 'EDITOU_USUARIO', 'usuarios', id, { name, role: roleDb });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+authAndUsersRouter.post('/users/:id/unlock', requireAuth, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de usuário inválido.' });
+      return;
+    }
+    await pool.query(
+      'UPDATE usuarios SET tentativas_login = 0, bloqueado_ate = NULL, updated_at = NOW() WHERE id = $1',
+      [id]
+    );
+    await logAudit(req.user!.id, 'DESBLOQUEOU_USUARIO', 'usuarios', id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: safeErrorMessage(err) });
