@@ -7,38 +7,59 @@ import { PasswordInput } from '../../components/ui/SharedUI';
 
 const permissionRows = [
   {
-    id: 'pdv',
+    id: 'operar_pdv',
     icon: 'point_of_sale',
     title: 'Operar Frente de Caixa (PDV)',
     desc: 'Permite bipar mercadorias, registrar pagamentos e emitir comprovantes fiscais.',
     defaultOn: true,
   },
   {
-    id: 'shift',
+    id: 'abrir_fechar_caixa',
     icon: 'lock_clock',
     title: 'Abrir e Fechar Turnos de Caixa',
     desc: 'Registro de fundo de troco (suprimento) e conferência de sangria periódica.',
     defaultOn: true,
   },
   {
-    id: 'cancel',
+    id: 'cancelar_venda_desconto',
     icon: 'remove_shopping_cart',
     title: 'Cancelar Vendas e Aplicar Descontos',
     desc: 'Exige autorização para abater valores ou anular cupom fiscal iniciado.',
     defaultOn: false,
   },
   {
-    id: 'products',
+    id: 'editar_produtos',
     icon: 'sell',
     title: 'Cadastrar e Editar Produtos / Preços',
     desc: 'Acesso para etiquetagem de gôndolas e cadastro rápido de mercadorias.',
     defaultOn: false,
   },
   {
-    id: 'losses',
+    id: 'registrar_perdas',
     icon: 'production_quantity_limits',
     title: 'Registrar Perdas e Movimentações',
     desc: 'Lançar quebras de hortifrúti, avarias de transporte ou consumo interno.',
+    defaultOn: false,
+  },
+  {
+    id: 'gerenciar_fiado',
+    icon: 'menu_book',
+    title: 'Gerenciar Crediário',
+    desc: 'Consultar limites, registrar recebimentos e controlar caderneta de clientes.',
+    defaultOn: false,
+  },
+  {
+    id: 'acessar_financeiro_abc',
+    icon: 'analytics',
+    title: 'Acessar Financeiro e Curva ABC',
+    desc: 'Visualizar contas a pagar, faturamento e relatórios gerenciais.',
+    defaultOn: false,
+  },
+  {
+    id: 'gerenciar_usuarios_config',
+    icon: 'admin_panel_settings',
+    title: 'Gerenciar Usuários e Configurações',
+    desc: 'Criar ou editar usuários, permissões e parâmetros da loja.',
     defaultOn: false,
   },
 ];
@@ -55,21 +76,32 @@ export function UserFormPage() {
   const [perms, setPerms] = useState<Record<string, boolean>>(
     Object.fromEntries(permissionRows.map((r) => [r.id, r.defaultOn]))
   );
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await addUser({
-      id: String(Date.now()),
-      name: name.trim(),
-      email: email.trim(),
-      role,
-      status: 'Ativo',
-      lastAccess: 'Recém-criado',
-      password,
-      pin,
-      permissions: perms,
-    });
-    navigate('/usuarios-e-permissoes');
+    if (submitting) return;
+    setErrorMsg(null);
+    setSubmitting(true);
+    try {
+      await addUser({
+        id: String(Date.now()),
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        status: 'Ativo',
+        lastAccess: 'Recém-criado',
+        password: password.trim(),
+        pin: pin.trim(),
+        permissions: perms,
+      });
+      navigate('/usuarios-e-permissoes');
+    } catch (err) {
+      setErrorMsg((err as Error).message || 'Erro ao cadastrar usuário.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -83,6 +115,11 @@ export function UserFormPage() {
       />
 
       <form onSubmit={handleSubmit} className="space-y-space-lg">
+        {errorMsg && (
+          <div className="p-3 rounded-xl bg-error-container text-on-error-container font-label-md font-bold">
+            {errorMsg}
+          </div>
+        )}
         {/* 1. Dados de Identificação e Acesso */}
         <section className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm p-space-xl space-y-space-md">
           <div className="pb-3 border-b border-surface-container">

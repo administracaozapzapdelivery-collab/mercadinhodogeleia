@@ -195,24 +195,36 @@ authAndUsersRouter.post('/users', requireAuth, requireRole('ADMIN'), async (req,
       res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
       return;
     }
+    const cleanName = String(name).trim();
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPassword = String(password || '123456').trim();
+    const cleanPin = String(pin || '1234').trim();
     const roleDb = role === 'Administrador' ? 'ADMIN' : role === 'Gerente' ? 'GERENTE' : 'OPERADOR';
-    const hash = await bcrypt.hash(password || '123456', 10);
+    const hash = await bcrypt.hash(cleanPassword, 10);
 
     const inserted = await pool.query(
       `INSERT INTO usuarios (nome, email_login, senha_hash, pin_rapido, perfil, permissoes_json, ativo, ultimo_acesso)
        VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), TRUE, NOW())
        RETURNING id`,
-      [name, email, hash, pin || '1234', roleDb, permissions ? JSON.stringify(permissions) : null]
+      [cleanName, cleanEmail, hash, cleanPin, roleDb, permissions ? JSON.stringify(permissions) : null]
     );
-    await logAudit(req.user!.id, 'CRIOU_USUARIO', 'usuarios', inserted.rows[0].id, { name, role: roleDb });
+    await logAudit(req.user!.id, 'CRIOU_USUARIO', 'usuarios', inserted.rows[0].id, {
+      name: cleanName,
+      role: roleDb,
+    });
     res.status(201).json({
       id: String(inserted.rows[0].id),
-      name,
-      email,
+      name: cleanName,
+      email: cleanEmail,
       role,
       permissions: permissions ?? {},
     });
   } catch (err) {
+    const pgErr = err as { code?: string };
+    if (pgErr?.code === '23505') {
+      res.status(409).json({ error: 'Já existe um usuário cadastrado com este e-mail.' });
+      return;
+    }
     res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
