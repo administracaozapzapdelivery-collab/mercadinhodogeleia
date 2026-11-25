@@ -99,10 +99,6 @@ export function LoginPage() {
             <span className="material-symbols-outlined text-[20px]">point_of_sale</span>
             <span>Autenticar e abrir PDV</span>
           </button>
-
-          <p className="font-body-sm text-on-surface-variant text-center pt-1">
-            Sessão isolada por aba: você pode manter o Admin logado em uma aba e um Operador no PDV em outra.
-          </p>
         </form>
       </div>
     </div>

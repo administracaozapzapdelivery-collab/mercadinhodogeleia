@@ -1,6 +1,7 @@
 # Dependências e builds
 node_modules/
 dist/
+.vercel/
 *.tsbuildinfo
 
 # Variáveis de ambiente e segredos (mantém apenas .env.example)
