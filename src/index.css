@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #3c008b;
+  --color-primary-container: #551bb3;
+  --color-secondary: #00658b;
+  --color-tertiary: #003533;
+  --color-surface: #f8f9ff;
+  --color-surface-card: #ffffff;
+  --color-on-surface: #0b1c30;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-body);
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    overscroll-behavior: none;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .receipt-print-area,
+  .receipt-print-area *,
+  .labels-print-area,
+  .labels-print-area * {
+    visibility: visible !important;
+  }
+  .receipt-print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .labels-print-area {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 6mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .label-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    border: 1px dashed #94a3b8 !important;
+    background: #ffffff !important;
+  }
+}
