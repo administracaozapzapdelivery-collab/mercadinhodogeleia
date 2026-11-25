@@ -13,16 +13,16 @@ export interface AuthTokenPayload {
   exp: number;
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: number;
-        email: string;
-        name: string;
-        role: UserRole;
-      };
-    }
+export interface AuthUserContext {
+  id: number;
+  email: string;
+  name: string;
+  role: UserRole;
+}
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: AuthUserContext;
   }
 }
 
