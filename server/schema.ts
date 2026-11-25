@@ -7,7 +7,14 @@ import { pool } from './db.ts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function initDatabase() {
-  const sqlPath = path.join(__dirname, 'sql', 'schema.sql');
+  const candidates = [
+    path.join(__dirname, 'sql', 'schema.sql'),
+    path.join(process.cwd(), 'server', 'sql', 'schema.sql'),
+  ];
+  const sqlPath = candidates.find((p) => fs.existsSync(p));
+  if (!sqlPath) {
+    throw new Error(`schema.sql não encontrado em: ${candidates.join(', ')}`);
+  }
   const sql = fs.readFileSync(sqlPath, 'utf8');
   await pool.query(sql);
 

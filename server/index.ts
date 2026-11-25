@@ -267,7 +267,10 @@ const port = Number(process.env.PORT ?? 3001);
 let dbInitPromise: Promise<void> | null = null;
 export function ensureDbInitialized() {
   if (!dbInitPromise) {
-    dbInitPromise = initDatabase();
+    dbInitPromise = initDatabase().catch((err) => {
+      dbInitPromise = null;
+      throw err;
+    });
   }
   return dbInitPromise;
 }
