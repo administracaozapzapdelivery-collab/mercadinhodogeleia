@@ -35,10 +35,11 @@ export interface ReceiptData {
 interface ReceiptModalProps {
   open: boolean;
   receipt: ReceiptData | null;
+  autoPrint?: boolean;
   onClose: () => void;
 }
 
-export function ReceiptModal({ open, receipt, onClose }: ReceiptModalProps) {
+export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: ReceiptModalProps) {
   const { company } = useErp();
   const [twoCopies, setTwoCopies] = useState(true);
   const [store, setStore] = useState<Partial<CompanyData>>({
@@ -65,6 +66,14 @@ export function ReceiptModal({ open, receipt, onClose }: ReceiptModalProps) {
       })
       .catch(() => {});
   }, [open, company]);
+
+  useEffect(() => {
+    if (!open || !receipt || !autoPrint) return;
+    const timer = setTimeout(() => {
+      window.print();
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [open, receipt, autoPrint]);
 
   if (!open || !receipt) return null;
 

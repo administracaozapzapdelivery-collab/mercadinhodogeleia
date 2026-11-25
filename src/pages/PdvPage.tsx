@@ -54,6 +54,7 @@ export function PdvPage() {
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [authorizerPin, setAuthorizerPin] = useState('');
@@ -242,9 +243,8 @@ export function PdvPage() {
             : undefined,
       };
       setLastReceipt(receiptPayload);
-      if (paymentMethod === 'Crediário') {
-        setReceiptOpen(true);
-      }
+      setAutoPrintReceipt(true);
+      setReceiptOpen(true);
 
       const trocoInfo = changeDue > 0 ? ` • Troco: ${formatBRL(changeDue)}` : '';
       const authInfo = body.authorizedBy ? ` • Autorizado por ${body.authorizedBy}` : '';
@@ -570,7 +570,10 @@ export function PdvPage() {
                 {lastReceipt && (
                   <button
                     type="button"
-                    onClick={() => setReceiptOpen(true)}
+                    onClick={() => {
+                      setAutoPrintReceipt(false);
+                      setReceiptOpen(true);
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-primary-container text-white font-label-sm font-bold shrink-0 flex items-center gap-1 hover:opacity-90"
                   >
                     <span className="material-symbols-outlined text-[16px]">print</span>
@@ -1257,8 +1260,10 @@ export function PdvPage() {
       <ReceiptModal
         open={receiptOpen}
         receipt={lastReceipt}
+        autoPrint={autoPrintReceipt}
         onClose={() => {
           setReceiptOpen(false);
+          setAutoPrintReceipt(false);
           scannerRef.current?.focus();
         }}
       />
