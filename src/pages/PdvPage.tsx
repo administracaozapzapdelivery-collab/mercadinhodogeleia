@@ -185,7 +185,13 @@ export function PdvPage() {
           })),
         }),
       });
-      const body = await res.json();
+      const rawText = await res.text();
+      let body: Record<string, any> = {};
+      try {
+        body = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        throw new Error('Resposta inválida do servidor. Verifique se a API está rodando.');
+      }
       if (!res.ok) {
         if (body?.requiresPin) {
           setPinReason(body.reason || 'Limite insuficiente ou cliente bloqueado no Crediário');
@@ -197,7 +203,12 @@ export function PdvPage() {
           setPinModalOpen(true);
           return;
         }
-        throw new Error(body.error || 'Erro ao finalizar venda');
+        throw new Error(
+          body.error ||
+            (res.status >= 500
+              ? 'Erro ao conectar com o servidor da API. Verifique se o backend está ativo.'
+              : 'Erro ao finalizar venda')
+        );
       }
 
       await refreshData();
