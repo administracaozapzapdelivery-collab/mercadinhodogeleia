@@ -4,6 +4,7 @@ import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
 import type { Customer } from '../types/erp';
 import { Modal, PageHeader, StatusBadge } from '../components/ui/SharedUI';
+import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActions';
 
 interface FiadoEntry {
   id: string;
@@ -15,8 +16,12 @@ interface FiadoEntry {
 
 export function CustomersPage() {
   const navigate = useNavigate();
-  const { customers, refreshData } = useErp();
+  const { customers, deleteCustomer, refreshData } = useErp();
   const [selected, setSelected] = useState<Customer | null>(null);
+  const [viewItem, setViewItem] = useState<Customer | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [entries, setEntries] = useState<FiadoEntry[]>([]);
   const [payAmount, setPayAmount] = useState('');
 
@@ -67,6 +72,7 @@ export function CustomersPage() {
               <th className="px-space-lg py-3 text-right">Saldo Devedor</th>
               <th className="px-space-lg py-3">Status</th>
               <th className="px-space-lg py-3 text-right">Caderneta</th>
+              <th className="px-space-lg py-3 text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-surface-container">
@@ -102,11 +108,79 @@ export function CustomersPage() {
                     Receber / Extrato
                   </button>
                 </td>
+                <td className="px-space-lg py-3 text-right">
+                  <CrudActionButtons
+                    onView={() => setViewItem(c)}
+                    onEdit={() => navigate(`/clientes/${c.id}/editar`)}
+                    onDelete={() => {
+                      setDeleteErr(null);
+                      setDeleteTarget(c);
+                    }}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={!!viewItem}
+        title={`Cliente — ${viewItem?.name ?? ''}`}
+        onClose={() => setViewItem(null)}
+      >
+        {viewItem && (
+          <div className="space-y-3 font-body-md">
+            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-surface-container-low">
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Nome Completo</p>
+                <p className="font-bold text-on-surface">{viewItem.name}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">CPF</p>
+                <p className="font-bold text-on-surface">{viewItem.cpf || 'Não informado'}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Telefone / WhatsApp</p>
+                <p className="font-bold text-on-surface">{viewItem.phone}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Situação</p>
+                <p className="font-bold text-on-surface">{viewItem.status}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Limite de Crédito</p>
+                <p className="font-bold text-primary">{formatBRL(viewItem.creditLimit)}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Saldo Devedor</p>
+                <p className="font-bold text-error">{formatBRL(viewItem.currentDebt)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        itemLabel={deleteTarget?.name ?? ''}
+        loading={deleting}
+        error={deleteErr}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          setDeleteErr(null);
+          try {
+            await deleteCustomer(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch (err) {
+            setDeleteErr((err as Error).message);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
 
       <Modal
         open={!!selected}

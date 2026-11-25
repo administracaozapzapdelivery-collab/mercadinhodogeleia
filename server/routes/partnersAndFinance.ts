@@ -31,6 +31,60 @@ partnersAndFinanceRouter.post('/customers', async (req, res) => {
   }
 });
 
+partnersAndFinanceRouter.put('/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
+    const statusDb =
+      status === 'Bloqueado'
+        ? 'BLOQUEADO'
+        : status === 'Atenção'
+          ? 'PROXIMO_VENCIMENTO'
+          : status === 'Em dia'
+            ? 'EM_DIA'
+            : null;
+    await pool.query(
+      `UPDATE clientes SET
+        nome = COALESCE($1, nome),
+        cpf = COALESCE($2, cpf),
+        telefone_whatsapp = COALESCE($3, telefone_whatsapp),
+        endereco = COALESCE($4, endereco),
+        limite_credito = COALESCE($5, limite_credito),
+        dia_vencimento_preferencial = COALESCE($6, dia_vencimento_preferencial),
+        status_credito = COALESCE($7, status_credito),
+        observacoes = COALESCE($8, observacoes),
+        updated_at = NOW()
+       WHERE id = $9`,
+      [
+        name ?? null,
+        cpf || null,
+        phone ?? null,
+        address ?? null,
+        creditLimit ?? null,
+        dueDay ?? null,
+        statusDb,
+        notes ?? null,
+        Number(id),
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+partnersAndFinanceRouter.delete('/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM clientes WHERE id = $1', [Number(id)]);
+    res.json({ ok: true });
+  } catch {
+    res.status(409).json({
+      error: 'Não é possível excluir cliente com vendas ou movimentações de crediário vinculadas.',
+    });
+  }
+});
+
 partnersAndFinanceRouter.get('/customers/:id/fiado', async (req, res) => {
   try {
     const { id } = req.params;
@@ -94,6 +148,52 @@ partnersAndFinanceRouter.post('/suppliers', async (req, res) => {
   }
 });
 
+partnersAndFinanceRouter.put('/suppliers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, cnpj, contact, phone, category, leadTimeDays, email } = req.body;
+    await pool.query(
+      `UPDATE fornecedores SET
+        razao_social = COALESCE($1, razao_social),
+        nome_fantasia = COALESCE($1, nome_fantasia),
+        cnpj = COALESCE($2, cnpj),
+        telefone_whatsapp = COALESCE($3, telefone_whatsapp),
+        email = COALESCE($4, email),
+        nome_vendedor = COALESCE($5, nome_vendedor),
+        categoria_fornecimento = COALESCE($6, categoria_fornecimento),
+        prazo_entrega_dias = COALESCE($7, prazo_entrega_dias)
+       WHERE id = $8`,
+      [
+        name ?? null,
+        cnpj || null,
+        phone ?? null,
+        email || null,
+        contact ?? null,
+        category ?? null,
+        leadTimeDays ?? null,
+        Number(id),
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+partnersAndFinanceRouter.delete('/suppliers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    try {
+      await pool.query('DELETE FROM fornecedores WHERE id = $1', [Number(id)]);
+    } catch {
+      await pool.query('UPDATE fornecedores SET ativo = FALSE WHERE id = $1', [Number(id)]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // Turnos de Caixa (Abertura e Fechamento)
 partnersAndFinanceRouter.post('/shifts/open', async (req, res) => {
   try {
@@ -144,17 +244,98 @@ partnersAndFinanceRouter.post('/shifts/:id/close', async (req, res) => {
 });
 
 // Contas a Pagar CRUD + Baixa Rápida
+function mapExpenseCategory(cat?: string) {
+  const c = (cat ?? '').toLowerCase();
+  if (c.includes('aluguel')) return 'ALUGUEL';
+  if (c.includes('impost') || c.includes('taxa')) return 'IMPOSTOS';
+  if (c.includes('manuten')) return 'MANUTENCAO';
+  if (c.includes('energia') || c.includes('água') || c.includes('util')) return 'UTILIDADES';
+  if (c.includes('folha') || c.includes('outr')) return 'OUTROS';
+  return 'MERCADORIA';
+}
+
 partnersAndFinanceRouter.post('/payables', async (req, res) => {
   try {
-    const { description, dueDate, amount, status } = req.body;
+    const { description, supplier, category, dueDate, amount, status } = req.body;
     const isoDate = dueDate.includes('/') ? dueDate.split('/').reverse().join('-') : dueDate;
     const statusDb = status === 'Pago' ? 'PAGO' : status === 'Vencido' ? 'ATRASADO' : 'PENDENTE';
+    let supplierId: number | null = null;
+    if (supplier && !supplier.toLowerCase().includes('sem fornecedor')) {
+      const supRes = await pool.query<{ id: number }>(
+        'SELECT id FROM fornecedores WHERE nome_fantasia = $1 LIMIT 1',
+        [supplier]
+      );
+      supplierId = supRes.rows[0]?.id ?? null;
+    }
     const inserted = await pool.query(
-      `INSERT INTO contas_a_pagar (descricao, categoria, valor, data_vencimento, status)
-       VALUES ($1, 'MERCADORIA', $2, $3, $4) RETURNING id`,
-      [description, amount, isoDate, statusDb]
+      `INSERT INTO contas_a_pagar (fornecedor_id, descricao, categoria, valor, data_vencimento, data_pagamento, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [
+        supplierId,
+        description,
+        mapExpenseCategory(category),
+        amount,
+        isoDate,
+        statusDb === 'PAGO' ? isoDate : null,
+        statusDb,
+      ]
     );
     res.status(201).json({ ...req.body, id: String(inserted.rows[0].id) });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+partnersAndFinanceRouter.put('/payables/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { description, supplier, category, dueDate, amount, status } = req.body;
+    const isoDate = dueDate
+      ? dueDate.includes('/')
+        ? dueDate.split('/').reverse().join('-')
+        : dueDate
+      : null;
+    const statusDb =
+      status === 'Pago' ? 'PAGO' : status === 'Vencido' ? 'ATRASADO' : status === 'Pendente' ? 'PENDENTE' : null;
+    let supplierId: number | null = null;
+    if (supplier && !supplier.toLowerCase().includes('sem fornecedor')) {
+      const supRes = await pool.query<{ id: number }>(
+        'SELECT id FROM fornecedores WHERE nome_fantasia = $1 LIMIT 1',
+        [supplier]
+      );
+      supplierId = supRes.rows[0]?.id ?? null;
+    }
+    await pool.query(
+      `UPDATE contas_a_pagar SET
+        fornecedor_id = $1,
+        descricao = COALESCE($2, descricao),
+        categoria = COALESCE($3, categoria),
+        valor = COALESCE($4, valor),
+        data_vencimento = COALESCE($5, data_vencimento),
+        status = COALESCE($6, status),
+        data_pagamento = CASE WHEN $6 = 'PAGO' THEN COALESCE(data_pagamento, CURRENT_DATE) ELSE data_pagamento END
+       WHERE id = $7`,
+      [
+        supplierId,
+        description ?? null,
+        category ? mapExpenseCategory(category) : null,
+        amount ?? null,
+        isoDate,
+        statusDb,
+        Number(id),
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+partnersAndFinanceRouter.delete('/payables/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM contas_a_pagar WHERE id = $1', [Number(id)]);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -219,7 +400,7 @@ partnersAndFinanceRouter.get('/reports/abc', async (_req, res) => {
 // Resumo agregado do Dashboard
 partnersAndFinanceRouter.get('/dashboard/summary', async (_req, res) => {
   try {
-    const [salesToday, criticalStock, fiadoTotal, expiringSoon] = await Promise.all([
+    const [salesToday, criticalStock, fiadoTotal, expiringSoon, cfgRow] = await Promise.all([
       pool.query<{ total: number; count: number }>(
         `SELECT COALESCE(SUM(total), 0)::float AS total, COUNT(*)::int AS count
          FROM vendas
@@ -237,6 +418,9 @@ partnersAndFinanceRouter.get('/dashboard/summary', async (_req, res) => {
          WHERE cfg.id = 1 AND p.ativo = TRUE AND p.data_validade IS NOT NULL
          AND p.data_validade <= CURRENT_DATE + (cfg.dias_alerta_validade || ' days')::INTERVAL`
       ),
+      pool.query<{ meta_diaria_faturamento: number }>(
+        'SELECT meta_diaria_faturamento FROM configuracoes WHERE id = 1'
+      ),
     ]);
 
     const totalRev = salesToday.rows[0]?.total ?? 0;
@@ -249,6 +433,7 @@ partnersAndFinanceRouter.get('/dashboard/summary', async (_req, res) => {
       fiadoTotal: fiadoTotal.rows[0]?.total ?? 0,
       fiadoCustomers: fiadoTotal.rows[0]?.count ?? 0,
       expiringCount: expiringSoon.rows[0]?.count ?? 0,
+      metaDiaria: Number(cfgRow.rows[0]?.meta_diaria_faturamento ?? 5800),
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

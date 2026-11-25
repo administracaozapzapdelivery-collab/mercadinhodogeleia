@@ -21,6 +21,7 @@ interface ConfigState {
   limite_fiado_padrao: number;
   exigir_abertura_caixa: boolean;
   registrar_log_auditoria: boolean;
+  meta_diaria_faturamento: number;
 }
 
 interface BackupRow {
@@ -45,6 +46,7 @@ export function SettingsPage() {
     limite_fiado_padrao: 200,
     exigir_abertura_caixa: true,
     registrar_log_auditoria: true,
+    meta_diaria_faturamento: 5800,
   });
 
   const cnpjErr = submitted && cfg.cnpj ? cnpjError(cfg.cnpj) : '';
@@ -159,6 +161,18 @@ export function SettingsPage() {
                 className={`w-full h-10 px-3 rounded-lg border ${phoneErr ? 'border-error ring-1 ring-error' : 'border-slate-200'}`}
               />
               {phoneErr && <p className="font-body-sm text-error mt-1">{phoneErr}</p>}
+            </div>
+            <div>
+              <label className="block font-label-md mb-1">Meta Diária de Faturamento (R$)</label>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={cfg.meta_diaria_faturamento}
+                onChange={(e) => setCfg({ ...cfg, meta_diaria_faturamento: Number(e.target.value) })}
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+              />
+              <p className="font-body-sm text-on-surface-variant mt-1">Exibida no card "Faturamento do Dia" no Dashboard.</p>
             </div>
           </div>
         )}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { FormFooter, FormPageHeader, StatusToggleCard } from '../../components/ui/FormLayout';
 import { maskCnpj, maskPhone, cnpjError, phoneError } from '../../utils/masks';
@@ -8,7 +8,9 @@ const weekDays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 export function SupplierFormPage() {
   const navigate = useNavigate();
-  const { addSupplier } = useErp();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
+  const { suppliers, addSupplier, updateSupplier } = useErp();
 
   const [active, setActive] = useState(true);
   const [name, setName] = useState('');
@@ -21,6 +23,18 @@ export function SupplierFormPage() {
   const [visitDays, setVisitDays] = useState<string[]>(['Qua', 'Sex']);
   const [submitted, setSubmitted] = useState(false);
 
+  useEffect(() => {
+    if (!id) return;
+    const existing = suppliers.find((s) => s.id === id);
+    if (!existing) return;
+    setName(existing.name);
+    setCnpj(existing.cnpj);
+    setPhone(existing.phone);
+    setContact(existing.contact);
+    setCategory(existing.category);
+    setLeadTimeDays(String(existing.leadTimeDays));
+  }, [id, suppliers]);
+
   const cnpjErr = submitted ? cnpjError(cnpj) : '';
   const phoneErr = submitted ? phoneError(phone, true) : '';
 
@@ -28,19 +42,26 @@ export function SupplierFormPage() {
     setVisitDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
     if (cnpjError(cnpj) || phoneError(phone, true)) return;
-    addSupplier({
-      id: String(Date.now()),
+    const payload = {
       name: name.trim(),
       cnpj: cnpj.trim(),
       contact: contact.trim() || 'Comercial',
       phone: phone.trim(),
       category,
       leadTimeDays: Number(leadTimeDays) || 2,
-    });
+    };
+    if (isEdit && id) {
+      await updateSupplier(id, payload);
+    } else {
+      await addSupplier({
+        id: String(Date.now()),
+        ...payload,
+      });
+    }
     navigate('/fornecedores');
   }
 
@@ -49,8 +70,8 @@ export function SupplierFormPage() {
       <FormPageHeader
         backLabel="Voltar para Fornecedores"
         backTo="/fornecedores"
-        icon="local_shipping"
-        title="Cadastrar Novo Fornecedor"
+        icon={isEdit ? 'edit' : 'local_shipping'}
+        title={isEdit ? 'Editar Fornecedor' : 'Cadastrar Novo Fornecedor'}
         subtitle="Adicione distribuidoras, atacadistas e parceiros de abastecimento do Mercadinho do Geleia"
         rightSlot={
           <StatusToggleCard

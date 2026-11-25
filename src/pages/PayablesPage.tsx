@@ -1,11 +1,18 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
-import { PageHeader, StatusBadge } from '../components/ui/SharedUI';
+import type { PayableAccount } from '../types/erp';
+import { Modal, PageHeader, StatusBadge } from '../components/ui/SharedUI';
+import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActions';
 
 export function PayablesPage() {
   const navigate = useNavigate();
-  const { payables, payPayable } = useErp();
+  const { payables, payPayable, deletePayable } = useErp();
+  const [viewItem, setViewItem] = useState<PayableAccount | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PayableAccount | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   return (
     <div className="flex flex-col gap-space-lg">
@@ -53,21 +60,89 @@ export function PayablesPage() {
                   />
                 </td>
                 <td className="px-space-lg py-3 text-right">
-                  {p.status !== 'Pago' && (
-                    <button
-                      type="button"
-                      onClick={() => void payPayable(p.id)}
-                      className="px-3 py-1 rounded-lg bg-[#3DDB8F] text-[#0F172A] font-label-sm font-bold"
-                    >
-                      Dar Baixa
-                    </button>
-                  )}
+                  <CrudActionButtons
+                    extra={
+                      p.status !== 'Pago' ? (
+                        <button
+                          type="button"
+                          onClick={() => void payPayable(p.id)}
+                          className="px-2.5 py-1 rounded-lg bg-[#3DDB8F] text-[#0F172A] font-label-sm font-bold hover:opacity-90"
+                        >
+                          Baixar
+                        </button>
+                      ) : undefined
+                    }
+                    onView={() => setViewItem(p)}
+                    onEdit={() => navigate(`/contas-a-pagar/${p.id}/editar`)}
+                    onDelete={() => {
+                      setDeleteErr(null);
+                      setDeleteTarget(p);
+                    }}
+                  />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={!!viewItem}
+        title={`Conta a Pagar — ${viewItem?.description ?? ''}`}
+        onClose={() => setViewItem(null)}
+      >
+        {viewItem && (
+          <div className="space-y-3 font-body-md">
+            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-surface-container-low">
+              <div className="col-span-2">
+                <p className="font-label-sm text-on-surface-variant">Descrição</p>
+                <p className="font-bold text-on-surface">{viewItem.description}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Fornecedor</p>
+                <p className="font-bold text-on-surface">{viewItem.supplier}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Categoria</p>
+                <p className="font-bold text-on-surface">{viewItem.category}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Vencimento</p>
+                <p className="font-bold text-on-surface">{viewItem.dueDate}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Valor</p>
+                <p className="font-bold text-primary">{formatBRL(viewItem.amount)}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Situação</p>
+                <p className="font-bold text-on-surface">{viewItem.status}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        itemLabel={deleteTarget?.description ?? ''}
+        loading={deleting}
+        error={deleteErr}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          setDeleteErr(null);
+          try {
+            await deletePayable(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch (err) {
+            setDeleteErr((err as Error).message);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 }

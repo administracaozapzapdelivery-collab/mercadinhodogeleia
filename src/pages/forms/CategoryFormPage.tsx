@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { FormFooter, FormPageHeader, StatusToggleCard } from '../../components/ui/FormLayout';
 
@@ -13,24 +13,39 @@ const labelColors = [
 
 export function CategoryFormPage() {
   const navigate = useNavigate();
-  const { addCategory } = useErp();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
+  const { categories, addCategory, updateCategory } = useErp();
 
   const [active, setActive] = useState(true);
-  const [name, setName] = useState('Laticínios e Frios');
-  const [description, setDescription] = useState(
-    'Seção refrigerada contendo queijos finos, leites integrais e desnatados, embutidos fatiados e manteigas coloniais.'
-  );
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState(labelColors[0]);
 
-  function handleSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    if (!id) return;
+    const existing = categories.find((c) => c.id === id);
+    if (!existing) return;
+    setName(existing.name);
+    setDescription(existing.description);
+  }, [id, categories]);
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    addCategory({
-      id: String(Date.now()),
+    const payload = {
       name: name.trim(),
       description: description.trim() || 'Sem descrição adicional',
-      productCount: 0,
       marginTarget: 32,
-    });
+    };
+    if (isEdit && id) {
+      await updateCategory(id, payload);
+    } else {
+      await addCategory({
+        id: String(Date.now()),
+        ...payload,
+        productCount: 0,
+      });
+    }
     navigate('/categorias');
   }
 
@@ -39,8 +54,8 @@ export function CategoryFormPage() {
       <FormPageHeader
         backLabel="Voltar para Categorias"
         backTo="/categorias"
-        icon="category"
-        title="Cadastrar Nova Categoria"
+        icon={isEdit ? 'edit' : 'category'}
+        title={isEdit ? 'Editar Categoria' : 'Cadastrar Nova Categoria'}
         subtitle="Crie ou edite uma seção para organizar os produtos do Mercadinho do Geleia"
         rightSlot={
           <StatusToggleCard

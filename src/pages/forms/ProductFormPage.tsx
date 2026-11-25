@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { formatBRL } from '../../data/mockData';
 import type { Product } from '../../types/erp';
@@ -7,7 +7,9 @@ import { FormFooter, FormPageHeader, StatusToggleCard } from '../../components/u
 
 export function ProductFormPage() {
   const navigate = useNavigate();
-  const { addProduct, categories, suppliers } = useErp();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
+  const { products, addProduct, updateProduct, categories, suppliers } = useErp();
 
   const [active, setActive] = useState(true);
   const [barcode, setBarcode] = useState('7896006716114');
@@ -22,6 +24,22 @@ export function ProductFormPage() {
   const [expiryDate, setExpiryDate] = useState('2027-06-30');
   const [adminOnly, setAdminOnly] = useState(false);
 
+  useEffect(() => {
+    if (!id) return;
+    const existing = products.find((p) => p.id === id);
+    if (!existing) return;
+    setBarcode(existing.barcode);
+    setName(existing.name);
+    setCategory(existing.category);
+    setUnit(existing.unit);
+    setCostPrice(String(existing.costPrice));
+    setSalePrice(String(existing.salePrice));
+    setStock(String(existing.stock));
+    setMinStock(String(existing.minStock));
+    setExpiryDate(existing.expiryDate ?? '');
+    setAdminOnly(Boolean(existing.adminOnly));
+  }, [id, products]);
+
   const cost = Number(costPrice) || 0;
   const sale = Number(salePrice) || 0;
   const profit = sale - cost;
@@ -32,11 +50,9 @@ export function ProductFormPage() {
     setBarcode(`INT-${rand}`);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    addProduct({
-      id: String(Date.now()),
-      sku: `PRD-${Math.floor(100 + Math.random() * 900)}`,
+    const payload = {
       barcode: barcode.trim(),
       name: name.trim(),
       category,
@@ -46,9 +62,18 @@ export function ProductFormPage() {
       stock: Number(stock) || 0,
       minStock: Number(minStock) || 5,
       expiryDate: expiryDate || undefined,
-      abcClass: 'B',
       adminOnly,
-    });
+    };
+    if (isEdit && id) {
+      await updateProduct(id, payload);
+    } else {
+      await addProduct({
+        id: String(Date.now()),
+        sku: `PRD-${Math.floor(100 + Math.random() * 900)}`,
+        ...payload,
+        abcClass: 'B',
+      });
+    }
     navigate('/produtos');
   }
 
@@ -57,8 +82,8 @@ export function ProductFormPage() {
       <FormPageHeader
         backLabel="Voltar para Produtos"
         backTo="/produtos"
-        icon="inventory_2"
-        title="Cadastrar Novo Produto"
+        icon={isEdit ? 'edit' : 'inventory_2'}
+        title={isEdit ? 'Editar Produto' : 'Cadastrar Novo Produto'}
         subtitle="Bipe o código de barras ou preencha os dados para liberar o item no PDV do Mercadinho do Geleia"
         rightSlot={
           <StatusToggleCard

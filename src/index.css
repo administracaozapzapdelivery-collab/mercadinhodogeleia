@@ -34,6 +34,15 @@
   user-select: none;
 }
 
+/* Oculta a barra de rolagem visual mantendo a rolagem com o mouse */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 @media print {
   aside,
   header,

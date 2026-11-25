@@ -1,10 +1,17 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
-import { PageHeader } from '../components/ui/SharedUI';
+import type { Category } from '../types/erp';
+import { Modal, PageHeader } from '../components/ui/SharedUI';
+import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActions';
 
 export function CategoriesPage() {
   const navigate = useNavigate();
-  const { categories } = useErp();
+  const { categories, deleteCategory } = useErp();
+  const [viewItem, setViewItem] = useState<Category | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   return (
     <div className="flex flex-col gap-space-lg">
@@ -40,14 +47,76 @@ export function CategoriesPage() {
               <p className="font-body-sm text-on-surface-variant mt-1">{cat.description}</p>
             </div>
             <div className="pt-2 border-t border-surface-container flex items-center justify-between text-body-sm">
-              <span className="text-on-surface-variant">Produtos vinculados</span>
-              <span className="font-label-lg font-bold text-on-surface tabular-nums">
-                {cat.productCount}
-              </span>
+              <div>
+                <span className="text-on-surface-variant">Produtos: </span>
+                <span className="font-label-lg font-bold text-on-surface tabular-nums">
+                  {cat.productCount}
+                </span>
+              </div>
+              <CrudActionButtons
+                onView={() => setViewItem(cat)}
+                onEdit={() => navigate(`/categorias/${cat.id}/editar`)}
+                onDelete={() => {
+                  setDeleteErr(null);
+                  setDeleteTarget(cat);
+                }}
+              />
             </div>
           </div>
         ))}
       </div>
+
+      <Modal
+        open={!!viewItem}
+        title={`Categoria — ${viewItem?.name ?? ''}`}
+        onClose={() => setViewItem(null)}
+      >
+        {viewItem && (
+          <div className="space-y-3 font-body-md">
+            <div className="p-3.5 rounded-xl bg-surface-container-low space-y-2">
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Nome</p>
+                <p className="font-bold text-on-surface">{viewItem.name}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Descrição</p>
+                <p className="text-on-surface">{viewItem.description || 'Sem descrição'}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <p className="font-label-sm text-on-surface-variant">Produtos vinculados</p>
+                  <p className="font-bold text-primary">{viewItem.productCount}</p>
+                </div>
+                <div>
+                  <p className="font-label-sm text-on-surface-variant">Margem alvo</p>
+                  <p className="font-bold text-primary">{viewItem.marginTarget}%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        itemLabel={deleteTarget?.name ?? ''}
+        loading={deleting}
+        error={deleteErr}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          setDeleteErr(null);
+          try {
+            await deleteCategory(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch (err) {
+            setDeleteErr((err as Error).message);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 }

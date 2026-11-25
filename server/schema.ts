@@ -24,6 +24,9 @@ export async function initDatabase() {
   await pool.query(
     'ALTER TABLE vendas ADD COLUMN IF NOT EXISTS motivo_autorizacao VARCHAR(150)'
   );
+  await pool.query(
+    'ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS meta_diaria_faturamento NUMERIC(10,2) NOT NULL DEFAULT 5800.00'
+  );
 
   // Garante registro padrão em dados_empresa
   await pool.query(`

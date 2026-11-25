@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { formatBRL } from '../../data/mockData';
 import { FormFooter, FormPageHeader, StatusToggleCard } from '../../components/ui/FormLayout';
@@ -7,7 +7,9 @@ import { maskCpf, maskPhone, cpfError, phoneError } from '../../utils/masks';
 
 export function CustomerFormPage() {
   const navigate = useNavigate();
-  const { addCustomer } = useErp();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
+  const { customers, addCustomer, updateCustomer } = useErp();
 
   const [fiadoEnabled, setFiadoEnabled] = useState(true);
   const [name, setName] = useState('');
@@ -19,24 +21,42 @@ export function CustomerFormPage() {
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
+  useEffect(() => {
+    if (!id) return;
+    const existing = customers.find((c) => c.id === id);
+    if (!existing) return;
+    setName(existing.name);
+    setCpf(existing.cpf === '000.000.000-00' ? '' : existing.cpf);
+    setPhone(existing.phone);
+    setCreditLimit(String(existing.creditLimit));
+    setFiadoEnabled(existing.status !== 'Bloqueado');
+  }, [id, customers]);
+
   const limitNum = Number(creditLimit) || 0;
   const cpfErr = submitted ? cpfError(cpf) : '';
   const phoneErr = submitted ? phoneError(phone, true) : '';
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
     if (cpfError(cpf) || phoneError(phone, true)) return;
-    addCustomer({
-      id: String(Date.now()),
+    const payload = {
       name: name.trim(),
       cpf: cpf.trim() || '000.000.000-00',
       phone: phone.trim(),
       creditLimit: limitNum,
-      currentDebt: 0,
-      status: fiadoEnabled ? 'Em dia' : 'Bloqueado',
-      lastPurchase: 'Novo cadastro',
-    });
+      status: (fiadoEnabled ? 'Em dia' : 'Bloqueado') as 'Em dia' | 'Bloqueado',
+    };
+    if (isEdit && id) {
+      await updateCustomer(id, payload);
+    } else {
+      await addCustomer({
+        id: String(Date.now()),
+        ...payload,
+        currentDebt: 0,
+        lastPurchase: 'Novo cadastro',
+      });
+    }
     navigate('/clientes');
   }
 
@@ -45,8 +65,8 @@ export function CustomerFormPage() {
       <FormPageHeader
         backLabel="Voltar para Clientes"
         backTo="/clientes"
-        icon="person_add"
-        title="Cadastrar Novo Cliente"
+        icon={isEdit ? 'edit' : 'person_add'}
+        title={isEdit ? 'Editar Cliente' : 'Cadastrar Novo Cliente'}
         subtitle="Adicione os dados de contato e defina o limite de crédito para compras no crediário no Mercadinho do Geleia."
         rightSlot={
           <StatusToggleCard

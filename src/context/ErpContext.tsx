@@ -40,18 +40,26 @@ interface ErpContextValue {
   refreshData: () => Promise<void>;
   products: Product[];
   addProduct: (product: Product) => Promise<void>;
+  updateProduct: (id: string, product: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   categories: Category[];
   addCategory: (category: Category) => Promise<void>;
+  updateCategory: (id: string, category: Partial<Category>) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
   customers: Customer[];
   addCustomer: (customer: Customer) => Promise<Customer>;
+  updateCustomer: (id: string, customer: Partial<Customer>) => Promise<void>;
+  deleteCustomer: (id: string) => Promise<void>;
   suppliers: Supplier[];
   addSupplier: (supplier: Supplier) => Promise<void>;
+  updateSupplier: (id: string, supplier: Partial<Supplier>) => Promise<void>;
+  deleteSupplier: (id: string) => Promise<void>;
   movements: StockMovement[];
   addMovement: (movement: StockMovement) => Promise<void>;
   payables: PayableAccount[];
   addPayable: (payable: PayableAccount) => Promise<void>;
+  updatePayable: (id: string, payable: Partial<PayableAccount>) => Promise<void>;
+  deletePayable: (id: string) => Promise<void>;
   payPayable: (id: string) => Promise<void>;
   shifts: CashShift[];
   addShift: (shift: CashShift) => Promise<void>;
@@ -70,11 +78,11 @@ interface ErpContextValue {
 
 const ErpContext = createContext<ErpContextValue | null>(null);
 
-async function apiPost<T>(url: string, payload: T) {
+async function apiRequest<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', payload?: T) {
   const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    method,
+    headers: payload !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: payload !== undefined ? JSON.stringify(payload) : undefined,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -82,6 +90,10 @@ async function apiPost<T>(url: string, payload: T) {
   }
   return res.json();
 }
+
+const apiPost = <T,>(url: string, payload: T) => apiRequest(url, 'POST', payload);
+const apiPut = <T,>(url: string, payload: T) => apiRequest(url, 'PUT', payload);
+const apiDelete = (url: string) => apiRequest(url, 'DELETE');
 
 export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -158,9 +170,13 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await apiPost('/api/products', p);
       await refreshData();
     },
+    updateProduct: async (id, p) => {
+      await apiPut(`/api/products/${id}`, p);
+      await refreshData();
+    },
     deleteProduct: async (id) => {
+      await apiDelete(`/api/products/${id}`);
       setProducts((prev) => prev.filter((p) => p.id !== id));
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
       await refreshData();
     },
     categories,
@@ -168,12 +184,12 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await apiPost('/api/categories', c);
       await refreshData();
     },
+    updateCategory: async (id, c) => {
+      await apiPut(`/api/categories/${id}`, c);
+      await refreshData();
+    },
     deleteCategory: async (id) => {
-      const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Erro ao excluir categoria.');
-      }
+      await apiDelete(`/api/categories/${id}`);
       setCategories((prev) => prev.filter((c) => c.id !== id));
       await refreshData();
     },
@@ -183,9 +199,27 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await refreshData();
       return created;
     },
+    updateCustomer: async (id, c) => {
+      await apiPut(`/api/customers/${id}`, c);
+      await refreshData();
+    },
+    deleteCustomer: async (id) => {
+      await apiDelete(`/api/customers/${id}`);
+      setCustomers((prev) => prev.filter((c) => c.id !== id));
+      await refreshData();
+    },
     suppliers,
     addSupplier: async (s) => {
       await apiPost('/api/suppliers', s);
+      await refreshData();
+    },
+    updateSupplier: async (id, s) => {
+      await apiPut(`/api/suppliers/${id}`, s);
+      await refreshData();
+    },
+    deleteSupplier: async (id) => {
+      await apiDelete(`/api/suppliers/${id}`);
+      setSuppliers((prev) => prev.filter((s) => s.id !== id));
       await refreshData();
     },
     movements,
@@ -196,6 +230,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     payables,
     addPayable: async (p) => {
       await apiPost('/api/payables', p);
+      await refreshData();
+    },
+    updatePayable: async (id, p) => {
+      await apiPut(`/api/payables/${id}`, p);
+      await refreshData();
+    },
+    deletePayable: async (id) => {
+      await apiDelete(`/api/payables/${id}`);
+      setPayables((prev) => prev.filter((p) => p.id !== id));
       await refreshData();
     },
     payPayable: async (id) => {

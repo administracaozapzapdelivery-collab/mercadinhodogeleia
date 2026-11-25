@@ -2,12 +2,18 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
-import { PageHeader, StatusBadge } from '../components/ui/SharedUI';
+import type { Product } from '../types/erp';
+import { Modal, PageHeader, StatusBadge } from '../components/ui/SharedUI';
+import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActions';
 
 export function ProductsPage() {
   const navigate = useNavigate();
   const { products, deleteProduct } = useErp();
   const [search, setSearch] = useState('');
+  const [viewItem, setViewItem] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const filtered = products.filter(
     (p) =>
@@ -98,29 +104,89 @@ export function ProductsPage() {
                   />
                 </td>
                 <td className="px-space-lg py-3 text-right">
-                  <div className="inline-flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/etiquetas?productId=${p.id}`)}
-                      className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-bold"
-                      title="Gerar etiqueta deste produto"
-                    >
-                      Etiqueta
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteProduct(p.id)}
-                      className="px-2.5 py-1 rounded-lg bg-error-container text-on-error-container font-label-sm font-bold hover:opacity-80"
-                    >
-                      Excluir
-                    </button>
-                  </div>
+                  <CrudActionButtons
+                    extra={
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/etiquetas?productId=${p.id}`)}
+                        className="w-8 h-8 rounded-lg bg-primary-fixed/60 text-primary-container hover:bg-primary-fixed inline-flex items-center justify-center transition-colors"
+                        title="Gerar etiqueta"
+                        aria-label="Gerar etiqueta"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">qr_code_2</span>
+                      </button>
+                    }
+                    onView={() => setViewItem(p)}
+                    onEdit={() => navigate(`/produtos/${p.id}/editar`)}
+                    onDelete={() => {
+                      setDeleteErr(null);
+                      setDeleteTarget(p);
+                    }}
+                  />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={!!viewItem}
+        title={`Produto — ${viewItem?.name ?? ''}`}
+        onClose={() => setViewItem(null)}
+      >
+        {viewItem && (
+          <div className="space-y-3 font-body-md">
+            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-surface-container-low">
+              <div>
+                <p className="font-label-sm text-on-surface-variant">SKU / Código</p>
+                <p className="font-bold text-on-surface">{viewItem.sku} • {viewItem.barcode || 'Sem barras'}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Categoria</p>
+                <p className="font-bold text-on-surface">{viewItem.category}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Preço de Custo</p>
+                <p className="font-bold text-on-surface">{formatBRL(viewItem.costPrice)}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Preço de Venda</p>
+                <p className="font-bold text-primary">{formatBRL(viewItem.salePrice)} / {viewItem.unit}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Estoque Atual / Mínimo</p>
+                <p className="font-bold text-on-surface">{viewItem.stock} / {viewItem.minStock} {viewItem.unit}</p>
+              </div>
+              <div>
+                <p className="font-label-sm text-on-surface-variant">Validade</p>
+                <p className="font-bold text-on-surface">{viewItem.expiryDate || 'Não informada'}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        itemLabel={deleteTarget?.name ?? ''}
+        loading={deleting}
+        error={deleteErr}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          setDeleteErr(null);
+          try {
+            await deleteProduct(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch (err) {
+            setDeleteErr((err as Error).message);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 }

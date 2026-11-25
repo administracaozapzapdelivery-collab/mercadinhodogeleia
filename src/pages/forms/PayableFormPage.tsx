@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import type { PayableAccount } from '../../types/erp';
 import { FormFooter, FormPageHeader } from '../../components/ui/FormLayout';
 
 export function PayableFormPage() {
   const navigate = useNavigate();
-  const { addPayable, suppliers } = useErp();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
+  const { payables, addPayable, updatePayable, suppliers } = useErp();
 
   const [description, setDescription] = useState('');
   const [supplier, setSupplier] = useState(suppliers[0]?.name ?? 'Despesa Fixa / Sem Fornecedor');
@@ -17,21 +19,43 @@ export function PayableFormPage() {
   const [barcode, setBarcode] = useState('');
   const [notes, setNotes] = useState('');
 
-  function handleSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    if (!id) return;
+    const existing = payables.find((p) => p.id === id);
+    if (!existing) return;
+    setDescription(existing.description);
+    setSupplier(existing.supplier || 'Despesa Fixa / Sem Fornecedor');
+    setCategory(existing.category);
+    setAmount(String(existing.amount));
+    const iso = existing.dueDate.includes('/')
+      ? existing.dueDate.split('/').reverse().join('-')
+      : existing.dueDate;
+    setDueDate(iso);
+    setStatus(existing.status);
+  }, [id, payables]);
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const formattedDate = dueDate.includes('-')
       ? dueDate.split('-').reverse().join('/')
       : dueDate;
 
-    addPayable({
-      id: String(Date.now()),
+    const payload = {
       description: description.trim(),
       supplier,
       dueDate: formattedDate,
       amount: Number(amount) || 0,
       status,
       category,
-    });
+    };
+    if (isEdit && id) {
+      await updatePayable(id, payload);
+    } else {
+      await addPayable({
+        id: String(Date.now()),
+        ...payload,
+      });
+    }
     navigate('/contas-a-pagar');
   }
 
@@ -40,8 +64,8 @@ export function PayableFormPage() {
       <FormPageHeader
         backLabel="Voltar para Contas a Pagar"
         backTo="/contas-a-pagar"
-        icon="payments"
-        title="Nova Conta a Pagar"
+        icon={isEdit ? 'edit' : 'payments'}
+        title={isEdit ? 'Editar Conta a Pagar' : 'Nova Conta a Pagar'}
         subtitle="Lance boletos de fornecedores ou despesas fixas do Mercadinho do Geleia"
       />
 

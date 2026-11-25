@@ -12,6 +12,7 @@ interface DashboardSummary {
   fiadoTotal: number;
   fiadoCustomers: number;
   expiringCount: number;
+  metaDiaria?: number;
 }
 
 export function DashboardPage() {
@@ -33,7 +34,8 @@ export function DashboardPage() {
   const avgTicket = summary?.avgTicket ?? 0;
   const salesCount = summary?.salesCount ?? 0;
   const fiadoTotal = summary?.fiadoTotal ?? 0;
-  const metaProgress = Math.min(100, Math.round((revenue / 5800) * 100));
+  const metaDiaria = summary?.metaDiaria ?? 5800;
+  const metaProgress = Math.min(100, Math.round((revenue / metaDiaria) * 100));
 
   return (
     <div className="flex flex-col gap-space-xl">
@@ -102,7 +104,7 @@ export function DashboardPage() {
               {formatBRL(revenue)}
             </span>
             <span className="font-body-sm text-on-surface-variant">
-              {salesCount} {salesCount === 1 ? 'venda hoje' : 'vendas hoje'} • Meta: R$ 5.800,00
+              {salesCount} {salesCount === 1 ? 'venda hoje' : 'vendas hoje'} • Meta: {formatBRL(metaDiaria)}
             </span>
           </div>
           <div className="mt-space-md pt-space-xs">

@@ -89,18 +89,40 @@ catalogRouter.post('/products', async (req, res) => {
 catalogRouter.put('/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, salePrice, costPrice, minStock, stock, expiryDate } = req.body;
+    const { name, barcode, category, unit, salePrice, costPrice, minStock, stock, expiryDate, adminOnly } = req.body;
+    let catId: number | null = null;
+    if (category) {
+      const catRes = await pool.query<{ id: number }>('SELECT id FROM categorias WHERE nome = $1 LIMIT 1', [category]);
+      catId = catRes.rows[0]?.id ?? null;
+    }
+    const unitDb = unit ? (unit === 'kg' ? 'KG' : unit === 'L' ? 'LT' : unit === 'cx' ? 'CX' : 'UN') : null;
     await pool.query(
       `UPDATE produtos SET
         nome = COALESCE($1, nome),
-        preco_venda = COALESCE($2, preco_venda),
-        preco_custo = COALESCE($3, preco_custo),
-        estoque_minimo = COALESCE($4, estoque_minimo),
-        estoque_atual = COALESCE($5, estoque_atual),
-        data_validade = COALESCE($6, data_validade),
+        codigo_barras = COALESCE($2, codigo_barras),
+        categoria_id = COALESCE($3, categoria_id),
+        unidade_medida = COALESCE($4, unidade_medida),
+        preco_venda = COALESCE($5, preco_venda),
+        preco_custo = COALESCE($6, preco_custo),
+        estoque_minimo = COALESCE($7, estoque_minimo),
+        estoque_atual = COALESCE($8, estoque_atual),
+        data_validade = COALESCE($9, data_validade),
+        somente_admin = COALESCE($10, somente_admin),
         updated_at = NOW()
-       WHERE id = $7`,
-      [name ?? null, salePrice ?? null, costPrice ?? null, minStock ?? null, stock ?? null, expiryDate ?? null, Number(id)]
+       WHERE id = $11`,
+      [
+        name ?? null,
+        barcode ?? null,
+        catId,
+        unitDb,
+        salePrice ?? null,
+        costPrice ?? null,
+        minStock ?? null,
+        stock ?? null,
+        expiryDate || null,
+        adminOnly ?? null,
+        Number(id),
+      ]
     );
     res.json({ ok: true });
   } catch (err) {

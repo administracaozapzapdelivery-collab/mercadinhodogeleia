@@ -110,6 +110,7 @@ app.get('/api/bootstrap', async (req, res) => {
           COALESCE(categoria_fornecimento, 'Geral') AS category,
           COALESCE(prazo_entrega_dias, 2) AS "leadTimeDays"
         FROM fornecedores
+        WHERE ativo = TRUE
         ORDER BY id DESC
       `),
       pool.query(`

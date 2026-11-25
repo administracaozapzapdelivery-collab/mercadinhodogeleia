@@ -44,10 +44,12 @@ export function App() {
 
             <Route path="/produtos" element={<ProductsPage />} />
             <Route path="/produtos/novo" element={<ProductFormPage />} />
+            <Route path="/produtos/:id/editar" element={<ProductFormPage />} />
             <Route path="/etiquetas" element={<LabelsPage />} />
 
             <Route path="/categorias" element={<CategoriesPage />} />
             <Route path="/categorias/nova" element={<CategoryFormPage />} />
+            <Route path="/categorias/:id/editar" element={<CategoryFormPage />} />
 
             <Route path="/movimentacoes-e-perdas" element={<MovementsPage />} />
             <Route path="/movimentacoes-e-perdas/nova" element={<MovementFormPage />} />
@@ -56,15 +58,18 @@ export function App() {
 
             <Route path="/clientes" element={<CustomersPage />} />
             <Route path="/clientes/novo" element={<CustomerFormPage />} />
+            <Route path="/clientes/:id/editar" element={<CustomerFormPage />} />
 
             <Route path="/fornecedores" element={<SuppliersPage />} />
             <Route path="/fornecedores/novo" element={<SupplierFormPage />} />
+            <Route path="/fornecedores/:id/editar" element={<SupplierFormPage />} />
 
             <Route path="/fluxo-de-caixa" element={<CashFlowPage />} />
             <Route path="/fluxo-de-caixa/abertura-fechamento" element={<CashShiftFormPage />} />
 
             <Route path="/contas-a-pagar" element={<PayablesPage />} />
             <Route path="/contas-a-pagar/nova" element={<PayableFormPage />} />
+            <Route path="/contas-a-pagar/:id/editar" element={<PayableFormPage />} />
 
             <Route path="/relatorios" element={<ReportsPage />} />
 
