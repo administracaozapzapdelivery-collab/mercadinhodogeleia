@@ -29,10 +29,10 @@ export function DashboardPage() {
   }, [sales.length, products.length]);
 
   const criticalProducts = products.filter((p) => p.stock <= p.minStock);
-  const revenue = summary?.revenueToday ?? 4825.9;
-  const avgTicket = summary?.avgTicket ?? 43.8;
-  const salesCount = summary?.salesCount ?? sales.length;
-  const fiadoTotal = summary?.fiadoTotal ?? 915.3;
+  const revenue = summary?.revenueToday ?? 0;
+  const avgTicket = summary?.avgTicket ?? 0;
+  const salesCount = summary?.salesCount ?? 0;
+  const fiadoTotal = summary?.fiadoTotal ?? 0;
   const metaProgress = Math.min(100, Math.round((revenue / 5800) * 100));
 
   return (
@@ -49,7 +49,7 @@ export function DashboardPage() {
             Olá, {currentUser?.nome ?? 'Geleia'}! Aqui está o resumo operacional de hoje.
           </h1>
           <p className="font-body-sm text-body-sm text-on-surface-variant">
-            Visão unificada das vendas, reposição preventiva e caderneta em tempo real no PostgreSQL.
+            Visão unificada das vendas, reposição preventiva e caderneta em tempo real.
           </p>
         </div>
 
@@ -90,17 +90,20 @@ export function DashboardPage() {
               <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary-container">
                 <span className="material-symbols-outlined text-[22px]">point_of_sale</span>
               </div>
-              <span className="font-label-lg text-label-lg text-on-surface-variant">Faturamento</span>
+              <span className="font-label-lg text-label-lg text-on-surface-variant">Faturamento do Dia</span>
             </div>
-            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-surface-container text-tertiary font-label-sm font-bold">
-              PostgreSQL
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-fixed/40 text-tertiary font-label-sm font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed-dim" />
+              Hoje
             </span>
           </div>
           <div className="my-space-xs">
             <span className="font-numeric-total text-numeric-total text-primary block tabular-nums">
               {formatBRL(revenue)}
             </span>
-            <span className="font-body-sm text-on-surface-variant">Meta Diária: R$ 5.800,00</span>
+            <span className="font-body-sm text-on-surface-variant">
+              {salesCount} {salesCount === 1 ? 'venda hoje' : 'vendas hoje'} • Meta: R$ 5.800,00
+            </span>
           </div>
           <div className="mt-space-md pt-space-xs">
             <div className="flex justify-between items-center mb-1">

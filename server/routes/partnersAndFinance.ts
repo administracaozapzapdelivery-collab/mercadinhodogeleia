@@ -221,7 +221,10 @@ partnersAndFinanceRouter.get('/dashboard/summary', async (_req, res) => {
   try {
     const [salesToday, criticalStock, fiadoTotal, expiringSoon] = await Promise.all([
       pool.query<{ total: number; count: number }>(
-        "SELECT COALESCE(SUM(total), 0)::float AS total, COUNT(*)::int AS count FROM vendas WHERE status = 'CONCLUIDA'"
+        `SELECT COALESCE(SUM(total), 0)::float AS total, COUNT(*)::int AS count
+         FROM vendas
+         WHERE status = 'CONCLUIDA'
+           AND (created_at AT TIME ZONE 'America/Sao_Paulo')::date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date`
       ),
       pool.query<{ count: number }>(
         'SELECT COUNT(*)::int AS count FROM produtos WHERE ativo = TRUE AND estoque_atual <= estoque_minimo'
