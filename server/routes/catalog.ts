@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { pool } from '../db.ts';
 import { logAudit } from '../utils/audit.ts';
+import { parsePositiveId, requireAuth, requireRole, safeErrorMessage } from '../utils/security.ts';
 
 export const catalogRouter = Router();
 
-// Categorias CRUD
-catalogRouter.post('/categories', async (req, res) => {
+// Categorias CRUD (ADMIN/GERENTE)
+catalogRouter.post('/categories', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const { name, description, colorHex, active } = req.body;
     const inserted = await pool.query(
@@ -14,36 +15,44 @@ catalogRouter.post('/categories', async (req, res) => {
     );
     res.status(201).json({ ...req.body, id: String(inserted.rows[0].id) });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-catalogRouter.put('/categories/:id', async (req, res) => {
+catalogRouter.put('/categories/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const { name, description, colorHex } = req.body;
     await pool.query(
       'UPDATE categorias SET nome = COALESCE($1, nome), descricao = COALESCE($2, descricao), cor_hex = COALESCE($3, cor_hex) WHERE id = $4',
-      [name ?? null, description ?? null, colorHex ?? null, Number(id)]
+      [name ?? null, description ?? null, colorHex ?? null, id]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-catalogRouter.delete('/categories/:id', async (req, res) => {
+catalogRouter.delete('/categories/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM categorias WHERE id = $1', [Number(id)]);
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
+    await pool.query('DELETE FROM categorias WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) {
+  } catch {
     res.status(400).json({ error: 'Não é possível excluir categoria com produtos vinculados.' });
   }
 });
 
 // Produtos CRUD + Alerta de Validade + Busca PDV
-catalogRouter.get('/products/expiring', async (_req, res) => {
+catalogRouter.get('/products/expiring', requireAuth, async (_req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -68,7 +77,7 @@ catalogRouter.get('/products/expiring', async (_req, res) => {
   }
 });
 
-catalogRouter.post('/products', async (req, res) => {
+catalogRouter.post('/products', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const { sku, barcode, name, category, unit, costPrice, salePrice, stock, minStock, expiryDate, photoUrl, adminOnly } = req.body;
     const catRes = await pool.query<{ id: number }>('SELECT id FROM categorias WHERE nome = $1 LIMIT 1', [category]);
@@ -86,9 +95,13 @@ catalogRouter.post('/products', async (req, res) => {
   }
 });
 
-catalogRouter.put('/products/:id', async (req, res) => {
+catalogRouter.put('/products/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const { name, barcode, category, unit, salePrice, costPrice, minStock, stock, expiryDate, adminOnly } = req.body;
     let catId: number | null = null;
     if (category) {
@@ -121,31 +134,40 @@ catalogRouter.put('/products/:id', async (req, res) => {
         stock ?? null,
         expiryDate || null,
         adminOnly ?? null,
-        Number(id),
+        id,
       ]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-catalogRouter.delete('/products/:id', async (req, res) => {
+catalogRouter.delete('/products/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
-    await pool.query('UPDATE produtos SET ativo = FALSE WHERE id = $1', [Number(id)]);
-    await logAudit(null, 'EXCLUIU_PRODUTO', 'produtos', Number(id));
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
+    await pool.query('UPDATE produtos SET ativo = FALSE WHERE id = $1', [id]);
+    await logAudit(req.user!.id, 'EXCLUIU_PRODUTO', 'produtos', id);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Movimentações de Estoque (com recálculo de custo médio em ENTRADA_COMPRA)
-catalogRouter.post('/movements', async (req, res) => {
+catalogRouter.post('/movements', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { productName, type, quantity, reason, costUnit, invoiceNumber, userId } = req.body;
+    const { productName, type, quantity, reason, costUnit, invoiceNumber } = req.body;
+    const qtyNum = Number(quantity);
+    if (!Number.isFinite(qtyNum) || qtyNum === 0) {
+      res.status(400).json({ error: 'Quantidade inválida.' });
+      return;
+    }
     await client.query('BEGIN');
 
     const prodRes = await client.query<{ id: number; estoque_atual: string; preco_custo: string }>(
@@ -168,11 +190,10 @@ catalogRouter.post('/movements', async (req, res) => {
         ? 'PERDA_AVARIA'
         : 'AJUSTE_INVENTARIO';
 
-    const qtyNum = Number(quantity);
     await client.query(
       `INSERT INTO movimentacoes_estoque (produto_id, usuario_id, tipo, quantidade, custo_unitario, numero_nota_fiscal, observacao)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [prod.id, Number(userId) || 1, tipoDb, qtyNum, costUnit ?? prod.preco_custo, invoiceNumber ?? null, reason ?? '']
+      [prod.id, req.user!.id, tipoDb, qtyNum, costUnit ?? prod.preco_custo, invoiceNumber ?? null, reason ?? '']
     );
 
     const cfg = await client.query<{ recalcular_custo_medio: boolean }>(

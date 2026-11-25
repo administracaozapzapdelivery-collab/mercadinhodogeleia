@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { clearAuthSession, getAuthToken, setAuthToken } from '../utils/authFetch';
 import {
   mockCategories,
   mockCustomers,
@@ -86,7 +87,19 @@ async function apiRequest<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', pay
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Erro na requisição (${res.status})`);
+    const err = new Error(body.error || `Erro na requisição (${res.status})`) as Error & {
+      remainingAttempts?: number;
+      maxAttempts?: number;
+      status?: number;
+    };
+    if (typeof body.remainingAttempts === 'number') {
+      err.remainingAttempts = body.remainingAttempts;
+    }
+    if (typeof body.maxAttempts === 'number') {
+      err.maxAttempts = body.maxAttempts;
+    }
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -100,6 +113,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [dbConnected, setDbConnected] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
+      if (!getAuthToken()) return null;
       const saved = sessionStorage.getItem('geleia_tab_user');
       return saved ? JSON.parse(saved) : null;
     } catch {
@@ -118,10 +132,14 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [sales, setSales] = useState<Sale[]>(mockSales);
   const [company, setCompany] = useState<CompanyData | null>(null);
 
-  const refreshData = useCallback(async (roleOverride?: string) => {
+  const refreshData = useCallback(async () => {
+    const token = getAuthToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     try {
-      const role = roleOverride ?? currentUser?.perfil ?? 'OPERADOR';
-      const r = await fetch(`/api/bootstrap?role=${encodeURIComponent(role)}`, { cache: 'no-store' });
+      const r = await fetch('/api/bootstrap', { cache: 'no-store' });
       if (!r.ok) throw new Error('API indisponível');
       const data = await r.json();
       setProducts(data.products);
@@ -140,22 +158,34 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [currentUser?.perfil]);
+  }, []);
 
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setCurrentUser(null);
+    };
+    window.addEventListener('geleia:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('geleia:unauthorized', handleUnauthorized);
+  }, []);
+
   async function login(email: string, password: string) {
-    const user = (await apiPost('/api/auth/login', { email, password })) as AuthUser;
+    const data = (await apiPost('/api/auth/login', { email, password })) as AuthUser & { token?: string };
+    const { token, ...user } = data;
+    if (token) {
+      setAuthToken(token);
+    }
     setCurrentUser(user);
     sessionStorage.setItem('geleia_tab_user', JSON.stringify(user));
-    await refreshData(user.perfil);
+    await refreshData();
   }
 
   function logout() {
     setCurrentUser(null);
-    sessionStorage.removeItem('geleia_tab_user');
+    clearAuthSession();
   }
 
   const value: ErpContextValue = {

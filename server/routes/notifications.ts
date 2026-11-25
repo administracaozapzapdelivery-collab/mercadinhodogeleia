@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { pool } from '../db.ts';
+import { parsePositiveId, requireAuth, safeErrorMessage } from '../utils/security.ts';
 
 export const notificationsRouter = Router();
+notificationsRouter.use(requireAuth);
 
 async function syncNotifications() {
   const { rows: cfgRows } = await pool.query<{ dias_alerta_validade: number }>(
@@ -195,7 +197,7 @@ async function syncNotifications() {
 notificationsRouter.get('/notifications', async (req, res) => {
   try {
     await syncNotifications();
-    const isAdmin = String(req.query.role ?? '').toUpperCase() === 'ADMIN';
+    const isAdmin = req.user!.role === 'ADMIN';
     const { rows } = await pool.query(
       `SELECT
          id::text AS id,
@@ -225,7 +227,7 @@ notificationsRouter.get('/notifications', async (req, res) => {
 
 notificationsRouter.patch('/notifications/read-all', async (req, res) => {
   try {
-    const isAdmin = String(req.query.role ?? '').toUpperCase() === 'ADMIN';
+    const isAdmin = req.user!.role === 'ADMIN';
     await pool.query(
       `UPDATE notificacoes
        SET lida = TRUE, updated_at = NOW()
@@ -257,7 +259,7 @@ notificationsRouter.patch('/notifications/:id/read', async (req, res) => {
 
 notificationsRouter.delete('/notifications', async (req, res) => {
   try {
-    const isAdmin = String(req.query.role ?? '').toUpperCase() === 'ADMIN';
+    const isAdmin = req.user!.role === 'ADMIN';
     const onlyRead = req.query.all !== 'true';
     await pool.query(
       `UPDATE notificacoes

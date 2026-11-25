@@ -11,6 +11,8 @@ export function LoginPage() {
   const [email, setEmail] = useState('everaldozs@gmail.com');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
+  const [maxAttempts, setMaxAttempts] = useState<number>(3);
   const [submitting, setSubmitting] = useState(false);
 
   const redirectTo = searchParams.get('redirect') || '/dashboard';
@@ -20,9 +22,17 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
+      setRemainingAttempts(null);
       navigate(targetPath, { replace: true });
     } catch (err) {
-      setErrorMsg((err as Error).message);
+      const authErr = err as Error & { remainingAttempts?: number; maxAttempts?: number };
+      setErrorMsg(authErr.message);
+      setRemainingAttempts(
+        typeof authErr.remainingAttempts === 'number' ? authErr.remainingAttempts : null
+      );
+      if (typeof authErr.maxAttempts === 'number') {
+        setMaxAttempts(authErr.maxAttempts);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -48,8 +58,18 @@ export function LoginPage() {
 
         <form onSubmit={handleSubmit} className="p-space-xl space-y-space-md">
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-error-container text-on-error-container font-label-md font-bold">
-              {errorMsg}
+            <div className="p-3 rounded-lg bg-error-container text-on-error-container space-y-1">
+              <div className="flex items-center gap-2 font-label-md font-bold">
+                <span className="material-symbols-outlined text-[18px]">error</span>
+                <span>{errorMsg}</span>
+              </div>
+              {remainingAttempts !== null && (
+                <p className="font-body-sm font-medium pl-6">
+                  {remainingAttempts > 0
+                    ? `Você ainda tem ${remainingAttempts} ${remainingAttempts === 1 ? 'tentativa restante' : 'tentativas restantes'} (de ${maxAttempts}).`
+                    : `0 de ${maxAttempts} tentativas restantes. Aguarde alguns minutos para tentar novamente.`}
+                </p>
+              )}
             </div>
           )}
 

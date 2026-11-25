@@ -1,8 +1,21 @@
 import { Router } from 'express';
 import { pool } from '../db.ts';
 import { logAudit } from '../utils/audit.ts';
+import {
+  createRateLimiter,
+  parsePositiveId,
+  requireAuth,
+  safeErrorMessage,
+} from '../utils/security.ts';
 
 export const salesAndPdvRouter = Router();
+
+const pinRateLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: 'Muitas tentativas de PIN. Aguarde alguns minutos.',
+  keyPrefix: 'pin',
+});
 
 const payMethodToDb: Record<string, string> = {
   Dinheiro: 'DINHEIRO',
@@ -14,14 +27,19 @@ const payMethodToDb: Record<string, string> = {
 };
 
 // Finalizar Venda no PDV (Transação Atômica)
-salesAndPdvRouter.post('/sales', async (req, res) => {
+salesAndPdvRouter.post('/sales', requireAuth, async (req, res, next) => {
+  if (req.body?.authorizerPin) {
+    pinRateLimiter(req, res, () => next());
+    return;
+  }
+  next();
+}, async (req, res) => {
   const client = await pool.connect();
   try {
     const {
       cupom,
       paymentMethod,
       customerId,
-      operatorId,
       items,
       discount = 0,
       authorizerPin,
@@ -29,22 +47,32 @@ salesAndPdvRouter.post('/sales', async (req, res) => {
       cupom: string;
       paymentMethod: string;
       customerId?: string;
-      operatorId?: string;
       authorizerPin?: string;
-      items: { productId: string; quantity: number; salePrice: number }[];
+      items: { productId: string; quantity: number; salePrice?: number }[];
       discount?: number;
     };
 
-    if (!items || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'Carrinho vazio.' });
+      return;
+    }
+
+    const parsedDiscount = Number(discount ?? 0);
+    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
+      res.status(400).json({ error: 'Desconto inválido.' });
       return;
     }
 
     await client.query('BEGIN');
 
     // 1. Verificar configuração e caixa aberto
-    const cfgRes = await client.query<{ exigir_abertura_caixa: boolean; bloquear_fiado_acima_limite: boolean }>(
-      'SELECT exigir_abertura_caixa, bloquear_fiado_acima_limite FROM configuracoes WHERE id = 1'
+    const cfgRes = await client.query<{
+      exigir_abertura_caixa: boolean;
+      bloquear_fiado_acima_limite: boolean;
+      exigir_pin_desconto_cancelamento: boolean;
+      desconto_max_sem_pin: string;
+    }>(
+      'SELECT exigir_abertura_caixa, bloquear_fiado_acima_limite, exigir_pin_desconto_cancelamento, desconto_max_sem_pin FROM configuracoes WHERE id = 1'
     );
     const cfg = cfgRes.rows[0];
 
@@ -60,21 +88,7 @@ salesAndPdvRouter.post('/sales', async (req, res) => {
     }
 
     const activeCaixaId = caixaId ?? 1;
-    const activeOpId = Number(operatorId) || 0;
-    if (activeOpId <= 0) {
-      await client.query('ROLLBACK');
-      res.status(401).json({ error: 'Operador não identificado. Faça login no PDV antes de finalizar a venda.' });
-      return;
-    }
-    const opCheck = await client.query<{ id: number }>(
-      'SELECT id FROM usuarios WHERE id = $1 AND ativo = TRUE LIMIT 1',
-      [activeOpId]
-    );
-    if (!opCheck.rows[0]) {
-      await client.query('ROLLBACK');
-      res.status(401).json({ error: 'Operador inválido ou inativo. Faça login novamente.' });
-      return;
-    }
+    const activeOpId = req.user!.id;
     const formaDb = payMethodToDb[paymentMethod] ?? 'PIX';
 
     let subtotal = 0;
@@ -87,26 +101,72 @@ salesAndPdvRouter.post('/sales', async (req, res) => {
     }[] = [];
 
     for (const item of items) {
+      const prodId = Number(item.productId);
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(prodId) || prodId <= 0 || !Number.isFinite(qty) || qty <= 0) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: 'Item ou quantidade inválida no carrinho.' });
+        return;
+      }
+
       const prodRes = await client.query<{ id: number; preco_venda: string; preco_custo: string }>(
-        'SELECT id, preco_venda, preco_custo FROM produtos WHERE id = $1 LIMIT 1',
-        [Number(item.productId)]
+        'SELECT id, preco_venda, preco_custo FROM produtos WHERE id = $1 AND ativo = TRUE LIMIT 1',
+        [prodId]
       );
       const prod = prodRes.rows[0];
-      if (!prod) continue;
-      const preco = Number(item.salePrice ?? prod.preco_venda);
+      if (!prod) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: `Produto #${prodId} não encontrado ou inativo.` });
+        return;
+      }
+      // Segurança: usa exclusivamente o preço de venda cadastrado no banco
+      const preco = Number(prod.preco_venda);
       const custo = Number(prod.preco_custo);
-      const itemSub = preco * item.quantity;
+      const itemSub = preco * qty;
       subtotal += itemSub;
       resolvedItems.push({
         produtoId: prod.id,
-        quantidade: item.quantity,
+        quantidade: qty,
         precoUnitario: preco,
         custoUnitario: custo,
         subtotal: itemSub,
       });
     }
 
-    const total = Math.max(0, subtotal - Number(discount));
+    if (parsedDiscount > subtotal) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Desconto não pode ser maior que o subtotal da venda.' });
+      return;
+    }
+
+    const discountPct = subtotal > 0 ? (parsedDiscount / subtotal) * 100 : 0;
+    const maxDiscountPct = Number(cfg?.desconto_max_sem_pin ?? 5);
+    if (
+      cfg?.exigir_pin_desconto_cancelamento &&
+      discountPct > maxDiscountPct &&
+      req.user!.role === 'OPERADOR'
+    ) {
+      const pinTrimmed = String(authorizerPin ?? '').trim();
+      if (!pinTrimmed) {
+        await client.query('ROLLBACK');
+        res.status(403).json({
+          error: `Desconto acima de ${maxDiscountPct}% exige PIN de Gerente ou Administrador.`,
+          requiresPin: true,
+        });
+        return;
+      }
+      const authDiscountRes = await client.query<{ id: number }>(
+        `SELECT id FROM usuarios WHERE pin_rapido = $1 AND ativo = TRUE AND perfil IN ('ADMIN', 'GERENTE') LIMIT 1`,
+        [pinTrimmed]
+      );
+      if (authDiscountRes.rowCount === 0) {
+        await client.query('ROLLBACK');
+        res.status(403).json({ error: 'PIN inválido para autorizar desconto.', requiresPin: true });
+        return;
+      }
+    }
+
+    const total = Math.max(0, subtotal - parsedDiscount);
 
     // Validar limite de crediário e autorização por PIN se pagamento for FIADO
     const parsedCustomerId = customerId ? Number(customerId) : null;
@@ -278,9 +338,13 @@ salesAndPdvRouter.post('/sales', async (req, res) => {
 });
 
 // Listar itens de uma venda (Modal "Ver")
-salesAndPdvRouter.get('/sales/:id/items', async (req, res) => {
+salesAndPdvRouter.get('/sales/:id/items', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de venda inválido.' });
+      return;
+    }
     const result = await pool.query(
       `SELECT
         vi.id::text AS id,
@@ -291,19 +355,23 @@ salesAndPdvRouter.get('/sales/:id/items', async (req, res) => {
        FROM venda_itens vi
        JOIN produtos p ON p.id = vi.produto_id
        WHERE vi.venda_id = $1`,
-      [Number(id)]
+      [id]
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Cancelar Venda (valida PIN ADMIN, estorna estoque e caixa, grava auditoria)
-salesAndPdvRouter.post('/sales/:id/cancel', async (req, res) => {
+salesAndPdvRouter.post('/sales/:id/cancel', requireAuth, pinRateLimiter, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de venda inválido.' });
+      return;
+    }
     const { adminPin } = req.body as { adminPin?: string };
 
     const cfgRes = await client.query<{ exigir_pin_desconto_cancelamento: boolean }>(
@@ -332,7 +400,7 @@ salesAndPdvRouter.post('/sales/:id/cancel', async (req, res) => {
       forma_pagamento: string;
       total: string;
       status: string;
-    }>('SELECT id, numero_cupom, caixa_id, forma_pagamento, total, status FROM vendas WHERE id = $1', [Number(id)]);
+    }>('SELECT id, numero_cupom, caixa_id, forma_pagamento, total, status FROM vendas WHERE id = $1', [id]);
 
     const sale = saleRes.rows[0];
     if (!sale || sale.status === 'CANCELADA') {

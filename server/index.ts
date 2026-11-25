@@ -7,10 +7,36 @@ import { catalogRouter } from './routes/catalog.ts';
 import { salesAndPdvRouter } from './routes/salesAndPdv.ts';
 import { partnersAndFinanceRouter } from './routes/partnersAndFinance.ts';
 import { notificationsRouter } from './routes/notifications.ts';
+import { requireAuth, safeErrorMessage, securityHeaders } from './utils/security.ts';
 
 export const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(securityHeaders);
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+      const isVercel = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+      if (isLocal || isVercel || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origem não permitida pelo CORS'));
+    },
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: '1mb' }));
 
 const payMethodFromDb: Record<string, string> = {
   DINHEIRO: 'Dinheiro',
@@ -25,13 +51,14 @@ app.get('/api/health', async (_req, res) => {
     await pool.query('SELECT 1');
     res.json({ ok: true, database: 'connected' });
   } catch (err) {
-    res.status(500).json({ ok: false, error: (err as Error).message });
+    res.status(500).json({ ok: false, error: safeErrorMessage(err, 'Banco indisponível.') });
   }
 });
 
-app.get('/api/bootstrap', async (req, res) => {
+app.get('/api/bootstrap', requireAuth, async (req, res) => {
   try {
-    const isAdmin = String(req.query.role ?? '').toUpperCase() === 'ADMIN';
+    const isAdmin = req.user!.role === 'ADMIN';
+    const canManageUsers = req.user!.role === 'ADMIN' || req.user!.role === 'GERENTE';
     const [
       products,
       categories,
@@ -165,23 +192,25 @@ app.get('/api/bootstrap', async (req, res) => {
         JOIN usuarios u ON u.id = cx.operador_id
         ORDER BY cx.id DESC
       `),
-      pool.query(`
-        SELECT
-          id::text AS id,
-          nome AS name,
-          email_login AS email,
-          CASE perfil
-            WHEN 'ADMIN' THEN 'Administrador'
-            WHEN 'GERENTE' THEN 'Gerente'
-            ELSE 'Operador de Caixa'
-          END AS role,
-          CASE WHEN ativo THEN 'Ativo' ELSE 'Inativo' END AS status,
-          COALESCE(TO_CHAR(ultimo_acesso, 'DD/MM/YYYY HH24:MI'), 'Recente') AS "lastAccess",
-          COALESCE(pin_rapido, '') AS pin,
-          permissoes_json AS permissions
-        FROM usuarios
-        ORDER BY id DESC
-      `),
+      canManageUsers
+        ? pool.query(`
+            SELECT
+              id::text AS id,
+              nome AS name,
+              email_login AS email,
+              CASE perfil
+                WHEN 'ADMIN' THEN 'Administrador'
+                WHEN 'GERENTE' THEN 'Gerente'
+                ELSE 'Operador de Caixa'
+              END AS role,
+              CASE WHEN ativo THEN 'Ativo' ELSE 'Inativo' END AS status,
+              COALESCE(TO_CHAR(ultimo_acesso, 'DD/MM/YYYY HH24:MI'), 'Recente') AS "lastAccess",
+              '' AS pin,
+              permissoes_json AS permissions
+            FROM usuarios
+            ORDER BY id DESC
+          `)
+        : Promise.resolve({ rows: [] }),
       pool.query(`
         SELECT
           v.id::text AS id,
@@ -220,7 +249,7 @@ app.get('/api/bootstrap', async (req, res) => {
       company: company.rows[0] ?? null,
     });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 

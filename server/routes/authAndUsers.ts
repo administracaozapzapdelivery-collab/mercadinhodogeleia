@@ -2,12 +2,36 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db.ts';
 import { logAudit } from '../utils/audit.ts';
+import {
+  createFailedAttemptTracker,
+  parsePositiveId,
+  requireAuth,
+  requireRole,
+  safeErrorMessage,
+  signAuthToken,
+  type UserRole,
+} from '../utils/security.ts';
 
 export const authAndUsersRouter = Router();
+
+const MAX_LOGIN_ATTEMPTS = 3;
+const loginTracker = createFailedAttemptTracker(MAX_LOGIN_ATTEMPTS, 15 * 60 * 1000);
 
 // 1. Login contra tabela usuarios
 authAndUsersRouter.post('/auth/login', async (req, res) => {
   try {
+    const lockState = loginTracker.checkBlocked(req);
+    if (lockState.blocked) {
+      res.setHeader('Retry-After', String(lockState.retryAfterSec));
+      res.status(429).json({
+        error: 'Muitas tentativas incorretas. Acesso temporariamente bloqueado; aguarde alguns minutos.',
+        remainingAttempts: 0,
+        maxAttempts: MAX_LOGIN_ATTEMPTS,
+        retryAfterSec: lockState.retryAfterSec,
+      });
+      return;
+    }
+
     const { email, password } = req.body as { email?: string; password?: string };
     if (!email || !password) {
       res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
@@ -22,17 +46,39 @@ authAndUsersRouter.post('/auth/login', async (req, res) => {
 
     const user = result.rows[0];
     if (!user || !user.ativo) {
-      res.status(401).json({ error: 'Usuário não encontrado ou inativo.' });
+      const fail = loginTracker.recordFailure(req);
+      res.status(fail.blocked ? 429 : 401).json({
+        error: fail.blocked
+          ? 'Usuário não encontrado ou inativo. Limite de tentativas atingido; aguarde alguns minutos.'
+          : 'Usuário não encontrado ou inativo.',
+        remainingAttempts: fail.remainingAttempts,
+        maxAttempts: MAX_LOGIN_ATTEMPTS,
+      });
       return;
     }
 
     const valid = await bcrypt.compare(password, user.senha_hash);
     if (!valid) {
-      res.status(401).json({ error: 'Senha incorreta.' });
+      const fail = loginTracker.recordFailure(req);
+      res.status(fail.blocked ? 429 : 401).json({
+        error: fail.blocked
+          ? 'Senha incorreta. Limite de 3 tentativas atingido; aguarde alguns minutos.'
+          : 'Senha incorreta.',
+        remainingAttempts: fail.remainingAttempts,
+        maxAttempts: MAX_LOGIN_ATTEMPTS,
+      });
       return;
     }
 
+    loginTracker.reset(req);
     await pool.query('UPDATE usuarios SET ultimo_acesso = NOW() WHERE id = $1', [user.id]);
+
+    const token = signAuthToken({
+      sub: String(user.id),
+      email: user.email_login,
+      name: user.nome,
+      role: user.perfil as UserRole,
+    });
 
     res.json({
       id: String(user.id),
@@ -40,16 +86,21 @@ authAndUsersRouter.post('/auth/login', async (req, res) => {
       email: user.email_login,
       perfil: user.perfil,
       permissoes: user.permissoes_json,
+      token,
     });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-// 2. CRUD Usuários
-authAndUsersRouter.post('/users', async (req, res) => {
+// 2. CRUD Usuários (somente ADMIN)
+authAndUsersRouter.post('/users', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { name, email, role, password, pin, permissions } = req.body;
+    if (!name || !email) {
+      res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
+      return;
+    }
     const roleDb = role === 'Administrador' ? 'ADMIN' : role === 'Gerente' ? 'GERENTE' : 'OPERADOR';
     const hash = await bcrypt.hash(password || '123456', 10);
 
@@ -59,15 +110,26 @@ authAndUsersRouter.post('/users', async (req, res) => {
        RETURNING id`,
       [name, email, hash, pin || '1234', roleDb, permissions ? JSON.stringify(permissions) : null]
     );
-    res.status(201).json({ ...req.body, id: String(inserted.rows[0].id) });
+    await logAudit(req.user!.id, 'CRIOU_USUARIO', 'usuarios', inserted.rows[0].id, { name, role: roleDb });
+    res.status(201).json({
+      id: String(inserted.rows[0].id),
+      name,
+      email,
+      role,
+      permissions: permissions ?? {},
+    });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-authAndUsersRouter.put('/users/:id', async (req, res) => {
+authAndUsersRouter.put('/users/:id', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de usuário inválido.' });
+      return;
+    }
     const { name, email, role, active, password, pin, permissions } = req.body;
     const roleDb = role === 'Administrador' ? 'ADMIN' : role === 'Gerente' ? 'GERENTE' : 'OPERADOR';
     const newHash = password ? await bcrypt.hash(password, 10) : null;
@@ -91,22 +153,30 @@ authAndUsersRouter.put('/users/:id', async (req, res) => {
         pin ?? null,
         newHash,
         permissions ? JSON.stringify(permissions) : null,
-        Number(id),
+        id,
       ]
     );
-    await logAudit(null, 'EDITOU_USUARIO', 'usuarios', Number(id), { name, role: roleDb });
+    await logAudit(req.user!.id, 'EDITOU_USUARIO', 'usuarios', id, { name, role: roleDb });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-authAndUsersRouter.delete('/users/:id', async (req, res) => {
+authAndUsersRouter.delete('/users/:id', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de usuário inválido.' });
+      return;
+    }
+    if (id === req.user!.id) {
+      res.status(400).json({ error: 'Não é possível excluir o próprio usuário logado.' });
+      return;
+    }
     try {
-      await pool.query('DELETE FROM usuarios WHERE id = $1', [Number(id)]);
-      await logAudit(null, 'EXCLUIU_USUARIO', 'usuarios', Number(id));
+      await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
+      await logAudit(req.user!.id, 'EXCLUIU_USUARIO', 'usuarios', id);
       res.json({ ok: true, deleted: true });
     } catch {
       res.status(409).json({
@@ -114,12 +184,12 @@ authAndUsersRouter.delete('/users/:id', async (req, res) => {
       });
     }
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // 3. Configurações (id = 1) e Backups
-authAndUsersRouter.get('/settings', async (_req, res) => {
+authAndUsersRouter.get('/settings', requireAuth, async (_req, res) => {
   try {
     const [cfg, backups] = await Promise.all([
       pool.query('SELECT * FROM configuracoes WHERE id = 1'),
@@ -127,11 +197,11 @@ authAndUsersRouter.get('/settings', async (_req, res) => {
     ]);
     res.json({ config: cfg.rows[0] ?? null, backups: backups.rows });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-authAndUsersRouter.put('/settings', async (req, res) => {
+authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const c = req.body;
     await pool.query(
@@ -169,7 +239,7 @@ authAndUsersRouter.put('/settings', async (req, res) => {
   }
 });
 
-authAndUsersRouter.post('/backups', async (_req, res) => {
+authAndUsersRouter.post('/backups', requireAuth, requireRole('ADMIN'), async (_req, res) => {
   try {
     const fileName = `backup_geleia_${new Date().toISOString().slice(0, 10)}.sql`;
     const inserted = await pool.query(
@@ -179,21 +249,21 @@ authAndUsersRouter.post('/backups', async (_req, res) => {
     );
     res.status(201).json(inserted.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // 4. Dados da Empresa (id = 1)
-authAndUsersRouter.get('/company', async (_req, res) => {
+authAndUsersRouter.get('/company', requireAuth, async (_req, res) => {
   try {
     const result = await pool.query('SELECT * FROM dados_empresa WHERE id = 1');
     res.json(result.rows[0] ?? null);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-authAndUsersRouter.put('/company', async (req, res) => {
+authAndUsersRouter.put('/company', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const c = req.body;
     const updated = await pool.query(

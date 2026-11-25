@@ -225,7 +225,7 @@ export function UsersPage() {
               </div>
               <div>
                 <span className="font-label-sm uppercase text-on-surface-variant">PIN Rápido</span>
-                <p className="font-label-md font-bold">{viewUser.pin || 'Não definido'}</p>
+                <p className="font-label-md font-bold">Protegido (oculto)</p>
               </div>
               <div>
                 <span className="font-label-sm uppercase text-on-surface-variant">Status</span>

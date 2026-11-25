@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { pool } from '../db.ts';
 import { logAudit } from '../utils/audit.ts';
+import { parsePositiveId, requireAuth, requireRole, safeErrorMessage } from '../utils/security.ts';
 
 export const partnersAndFinanceRouter = Router();
 
 // Clientes CRUD + Fiado
-partnersAndFinanceRouter.post('/customers', async (req, res) => {
+partnersAndFinanceRouter.post('/customers', requireAuth, async (req, res) => {
   try {
     const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
     const statusDb = status === 'Bloqueado' ? 'BLOQUEADO' : status === 'Atenção' ? 'PROXIMO_VENCIMENTO' : 'EM_DIA';
@@ -31,9 +32,13 @@ partnersAndFinanceRouter.post('/customers', async (req, res) => {
   }
 });
 
-partnersAndFinanceRouter.put('/customers/:id', async (req, res) => {
+partnersAndFinanceRouter.put('/customers/:id', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
     const statusDb =
       status === 'Bloqueado'
@@ -64,19 +69,23 @@ partnersAndFinanceRouter.put('/customers/:id', async (req, res) => {
         dueDay ?? null,
         statusDb,
         notes ?? null,
-        Number(id),
+        id,
       ]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.delete('/customers/:id', async (req, res) => {
+partnersAndFinanceRouter.delete('/customers/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM clientes WHERE id = $1', [Number(id)]);
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
+    await pool.query('DELETE FROM clientes WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch {
     res.status(409).json({
@@ -85,28 +94,36 @@ partnersAndFinanceRouter.delete('/customers/:id', async (req, res) => {
   }
 });
 
-partnersAndFinanceRouter.get('/customers/:id/fiado', async (req, res) => {
+partnersAndFinanceRouter.get('/customers/:id/fiado', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const result = await pool.query(
       `SELECT id::text AS id, tipo::text AS type, valor::float AS amount,
        COALESCE(observacao, '') AS note, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI') AS date
        FROM movimentacoes_fiado WHERE cliente_id = $1 ORDER BY id DESC`,
-      [Number(id)]
+      [id]
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.post('/customers/:id/fiado/pay', async (req, res) => {
+partnersAndFinanceRouter.post('/customers/:id/fiado/pay', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { amount, note, userId } = req.body as { amount: number; note?: string; userId?: number };
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
+    const { amount, note } = req.body as { amount: number; note?: string };
     const val = Number(amount);
-    if (!val || val <= 0) {
+    if (!Number.isFinite(val) || val <= 0) {
       res.status(400).json({ error: 'Valor de pagamento inválido.' });
       return;
     }
@@ -115,26 +132,26 @@ partnersAndFinanceRouter.post('/customers/:id/fiado/pay', async (req, res) => {
     await client.query(
       `INSERT INTO movimentacoes_fiado (cliente_id, usuario_id, tipo, valor, observacao)
        VALUES ($1, $2, 'PAGAMENTO_ABATE', $3, $4)`,
-      [Number(id), userId || 1, val, note || 'Abatimento de fiado no balcão']
+      [id, req.user!.id, val, note || 'Abatimento de fiado no balcão']
     );
     await client.query(
       `UPDATE clientes SET saldo_devedor = GREATEST(0, saldo_devedor - $1),
        status_credito = CASE WHEN saldo_devedor - $1 <= 0 THEN 'EM_DIA'::status_credito_enum ELSE status_credito END,
        updated_at = NOW() WHERE id = $2`,
-      [val, Number(id)]
+      [val, id]
     );
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   } finally {
     client.release();
   }
 });
 
-// Fornecedores CRUD
-partnersAndFinanceRouter.post('/suppliers', async (req, res) => {
+// Fornecedores CRUD (ADMIN/GERENTE)
+partnersAndFinanceRouter.post('/suppliers', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const { name, cnpj, contact, phone, category, leadTimeDays, email } = req.body;
     const inserted = await pool.query(
@@ -148,9 +165,13 @@ partnersAndFinanceRouter.post('/suppliers', async (req, res) => {
   }
 });
 
-partnersAndFinanceRouter.put('/suppliers/:id', async (req, res) => {
+partnersAndFinanceRouter.put('/suppliers/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const { name, cnpj, contact, phone, category, leadTimeDays, email } = req.body;
     await pool.query(
       `UPDATE fornecedores SET
@@ -171,51 +192,59 @@ partnersAndFinanceRouter.put('/suppliers/:id', async (req, res) => {
         contact ?? null,
         category ?? null,
         leadTimeDays ?? null,
-        Number(id),
+        id,
       ]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.delete('/suppliers/:id', async (req, res) => {
+partnersAndFinanceRouter.delete('/suppliers/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     try {
-      await pool.query('DELETE FROM fornecedores WHERE id = $1', [Number(id)]);
+      await pool.query('DELETE FROM fornecedores WHERE id = $1', [id]);
     } catch {
-      await pool.query('UPDATE fornecedores SET ativo = FALSE WHERE id = $1', [Number(id)]);
+      await pool.query('UPDATE fornecedores SET ativo = FALSE WHERE id = $1', [id]);
     }
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Turnos de Caixa (Abertura e Fechamento)
-partnersAndFinanceRouter.post('/shifts/open', async (req, res) => {
+partnersAndFinanceRouter.post('/shifts/open', requireAuth, async (req, res) => {
   try {
-    const { openingBalance, operatorId, registerNumber, notes } = req.body;
+    const { openingBalance, registerNumber, notes } = req.body;
     const inserted = await pool.query(
       `INSERT INTO caixas (numero_pdv, operador_id, valor_inicial, status, observacao_abertura)
        VALUES ($1, $2, $3, 'ABERTO', $4) RETURNING id`,
-      [registerNumber || 1, operatorId || 1, openingBalance ?? 200, notes ?? null]
+      [registerNumber || 1, req.user!.id, openingBalance ?? 200, notes ?? null]
     );
     res.status(201).json({ id: String(inserted.rows[0].id) });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.post('/shifts/:id/close', async (req, res) => {
+partnersAndFinanceRouter.post('/shifts/:id/close', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de turno inválido.' });
+      return;
+    }
     const { countedCash, notes } = req.body as { countedCash: number; notes?: string };
     const shiftRes = await pool.query<{ valor_inicial: string; valor_sistema_dinheiro: string }>(
       'SELECT valor_inicial, valor_sistema_dinheiro FROM caixas WHERE id = $1',
-      [Number(id)]
+      [id]
     );
     const sh = shiftRes.rows[0];
     if (!sh) {
@@ -234,12 +263,12 @@ partnersAndFinanceRouter.post('/shifts/:id/close', async (req, res) => {
         status = 'FECHADO',
         observacao_fechamento = $3
        WHERE id = $4`,
-      [Number(countedCash), diff, notes ?? null, Number(id)]
+      [Number(countedCash), diff, notes ?? null, id]
     );
-    await logAudit(null, 'FECHOU_CAIXA', 'caixas', Number(id), { countedCash, diff });
+    await logAudit(req.user!.id, 'FECHOU_CAIXA', 'caixas', id, { countedCash, diff });
     res.json({ ok: true, diff });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -254,7 +283,7 @@ function mapExpenseCategory(cat?: string) {
   return 'MERCADORIA';
 }
 
-partnersAndFinanceRouter.post('/payables', async (req, res) => {
+partnersAndFinanceRouter.post('/payables', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const { description, supplier, category, dueDate, amount, status } = req.body;
     const isoDate = dueDate.includes('/') ? dueDate.split('/').reverse().join('-') : dueDate;
@@ -286,9 +315,13 @@ partnersAndFinanceRouter.post('/payables', async (req, res) => {
   }
 });
 
-partnersAndFinanceRouter.put('/payables/:id', async (req, res) => {
+partnersAndFinanceRouter.put('/payables/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     const { description, supplier, category, dueDate, amount, status } = req.body;
     const isoDate = dueDate
       ? dueDate.includes('/')
@@ -322,40 +355,48 @@ partnersAndFinanceRouter.put('/payables/:id', async (req, res) => {
         amount ?? null,
         isoDate,
         statusDb,
-        Number(id),
+        id,
       ]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.delete('/payables/:id', async (req, res) => {
+partnersAndFinanceRouter.delete('/payables/:id', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM contas_a_pagar WHERE id = $1', [Number(id)]);
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
+    await pool.query('DELETE FROM contas_a_pagar WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
-partnersAndFinanceRouter.post('/payables/:id/pay', async (req, res) => {
+partnersAndFinanceRouter.post('/payables/:id/pay', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID inválido.' });
+      return;
+    }
     await pool.query(
       "UPDATE contas_a_pagar SET status = 'PAGO', data_pagamento = CURRENT_DATE WHERE id = $1",
-      [Number(id)]
+      [id]
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Relatório Curva ABC real de venda_itens
-partnersAndFinanceRouter.get('/reports/abc', async (_req, res) => {
+partnersAndFinanceRouter.get('/reports/abc', requireAuth, async (_req, res) => {
   try {
     const result = await pool.query<{
       productId: string;
@@ -398,7 +439,7 @@ partnersAndFinanceRouter.get('/reports/abc', async (_req, res) => {
 });
 
 // Resumo agregado do Dashboard
-partnersAndFinanceRouter.get('/dashboard/summary', async (_req, res) => {
+partnersAndFinanceRouter.get('/dashboard/summary', requireAuth, async (_req, res) => {
   try {
     const [salesToday, criticalStock, fiadoTotal, expiringSoon, cfgRow] = await Promise.all([
       pool.query<{ total: number; count: number }>(
