@@ -6,35 +6,55 @@ import { FormFooter, FormPageHeader } from '../../components/ui/FormLayout';
 
 export function CashShiftFormPage() {
   const navigate = useNavigate();
-  const { addShift, shifts, refreshData } = useErp();
+  const { addShift, shifts, refreshData, currentUser, users } = useErp();
   const openShift = shifts.find((s) => s.status === 'Aberto');
+  const isAdmin = currentUser?.perfil === 'ADMIN';
+  const adminUsers = users.filter((u) => u.role === 'Administrador' && u.status === 'Ativo');
 
-  const [mode, setMode] = useState<'abertura' | 'fechamento'>('abertura');
-  const [operator, setOperator] = useState('Maria Clara');
+  const [mode, setMode] = useState<'abertura' | 'fechamento'>(isAdmin ? 'abertura' : 'fechamento');
+  const [operator, setOperator] = useState(
+    currentUser?.nome || adminUsers[0]?.name || 'Administrador'
+  );
   const [register, setRegister] = useState('Caixa 01 (Balcão)');
   const [openingBalance, setOpeningBalance] = useState(200);
   const [countedCash, setCountedCash] = useState('1350.00');
   const [notes, setNotes] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setErrorMsg(null);
     if (mode === 'abertura') {
-      await addShift({
-        id: String(Date.now()),
-        register,
-        operator,
-        openedAt: 'Agora',
-        openingBalance,
-        totalSales: 0,
-        expectedBalance: openingBalance,
-        status: 'Aberto',
-      });
+      if (!isAdmin) {
+        setErrorMsg('Somente Administrador pode abrir o caixa.');
+        return;
+      }
+      try {
+        await addShift({
+          id: String(Date.now()),
+          register,
+          operator,
+          openedAt: 'Agora',
+          openingBalance,
+          totalSales: 0,
+          expectedBalance: openingBalance,
+          status: 'Aberto',
+        });
+      } catch (err) {
+        setErrorMsg((err as Error).message);
+        return;
+      }
     } else if (openShift) {
-      await fetch(`/api/shifts/${openShift.id}/close`, {
+      const res = await fetch(`/api/shifts/${openShift.id}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ countedCash: Number(countedCash) || 0, notes }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setErrorMsg(body.error || 'Erro ao fechar o caixa.');
+        return;
+      }
       await refreshData();
     }
     navigate('/fluxo-de-caixa');
@@ -87,20 +107,42 @@ export function CashShiftFormPage() {
         onSubmit={handleSubmit}
         className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm p-space-xl space-y-space-lg"
       >
+        {errorMsg && (
+          <div className="p-3 rounded-lg bg-error-container text-on-error-container font-label-md font-bold">
+            {errorMsg}
+          </div>
+        )}
+
+        {mode === 'abertura' && !isAdmin && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-label-md font-bold flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px]">lock</span>
+            <span>Somente Administrador pode abrir o caixa.</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
           <div>
             <label htmlFor="shift-op" className="block font-label-md mb-1">
-              Operador Responsável <span className="text-error">*</span>
+              Administrador Responsável <span className="text-error">*</span>
             </label>
             <select
               id="shift-op"
               value={operator}
               onChange={(e) => setOperator(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white"
+              disabled={mode === 'abertura' && !isAdmin}
+              className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white disabled:opacity-60"
             >
-              <option value="Maria Clara">Maria Clara (Operadora Principal)</option>
-              <option value="Geleia">Geleia (Supervisor / Gerente Geral)</option>
-              <option value="João Pedro">João Pedro (Atendente Vespertino)</option>
+              {adminUsers.length > 0 ? (
+                adminUsers.map((u) => (
+                  <option key={u.id} value={u.name}>
+                    {u.name} (Administrador)
+                  </option>
+                ))
+              ) : (
+                <option value={currentUser?.nome || 'Administrador'}>
+                  {currentUser?.nome || 'Administrador'}
+                </option>
+              )}
             </select>
           </div>
 

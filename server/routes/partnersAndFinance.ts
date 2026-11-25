@@ -219,8 +219,8 @@ partnersAndFinanceRouter.delete('/suppliers/:id', requireAuth, requireRole('ADMI
   }
 });
 
-// Turnos de Caixa (Abertura e Fechamento)
-partnersAndFinanceRouter.post('/shifts/open', requireAuth, async (req, res) => {
+// Turnos de Caixa (Abertura exclusiva para ADMIN e Fechamento)
+partnersAndFinanceRouter.post('/shifts/open', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { openingBalance, registerNumber, notes } = req.body;
     const inserted = await pool.query(

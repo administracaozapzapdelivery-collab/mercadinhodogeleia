@@ -46,7 +46,7 @@ authAndUsersRouter.post('/auth/login', async (req, res) => {
     }>(
       `SELECT id, nome, email_login, senha_hash, perfil, permissoes_json, ativo,
               COALESCE(tentativas_login, 0) AS tentativas_login, bloqueado_ate
-       FROM usuarios WHERE email_login = $1 LIMIT 1`,
+       FROM usuarios WHERE LOWER(email_login) = LOWER($1) LIMIT 1`,
       [email.trim()]
     );
 
