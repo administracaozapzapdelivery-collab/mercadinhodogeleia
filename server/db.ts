@@ -8,7 +8,7 @@ if (!process.env.DATABASE_URL) {
 const useSsl =
   process.env.DATABASE_SSL === 'true' ||
   process.env.DATABASE_URL.includes('sslmode=require') ||
-  (Boolean(process.env.VERCEL) && process.env.DATABASE_SSL !== 'false');
+  process.env.DATABASE_URL.includes('ssl=true');
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
