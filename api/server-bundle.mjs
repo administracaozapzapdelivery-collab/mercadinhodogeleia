@@ -47,6 +47,11 @@ async function initDatabase() {
     "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS meta_diaria_faturamento NUMERIC(10,2) NOT NULL DEFAULT 5800.00"
   );
   await pool.query(
+    `UPDATE configuracoes
+     SET nome_impressora = 'VOX(U) 1'
+     WHERE id = 1 AND (nome_impressora IS NULL OR nome_impressora = '' OR nome_impressora = 'EPSON TM-T20X \u2014 Balc\xE3o 01')`
+  );
+  await pool.query(
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0"
   );
   await pool.query(
@@ -665,6 +670,7 @@ authAndUsersRouter.put("/settings", requireAuth, requireRole("ADMIN", "GERENTE")
         registrar_log_auditoria = COALESCE($9, registrar_log_auditoria),
         recalcular_custo_medio = COALESCE($10, recalcular_custo_medio),
         meta_diaria_faturamento = COALESCE($11, meta_diaria_faturamento),
+        nome_impressora = COALESCE($12, nome_impressora),
         updated_at = NOW()
        WHERE id = 1`,
       [
@@ -678,7 +684,8 @@ authAndUsersRouter.put("/settings", requireAuth, requireRole("ADMIN", "GERENTE")
         c.exigir_abertura_caixa ?? null,
         c.registrar_log_auditoria ?? null,
         c.recalcular_custo_medio ?? null,
-        c.meta_diaria_faturamento != null ? Number(c.meta_diaria_faturamento) : null
+        c.meta_diaria_faturamento != null ? Number(c.meta_diaria_faturamento) : null,
+        c.nome_impressora ?? null
       ]
     );
     res.json({ ok: true });
@@ -1995,6 +2002,519 @@ notificationsRouter.delete("/notifications/:id", async (req, res) => {
   }
 });
 
+// server/routes/print.ts
+import { Router as Router6 } from "express";
+
+// server/utils/printer.ts
+import { execFile } from "node:child_process";
+import fs2 from "node:fs/promises";
+import os from "node:os";
+import path2 from "node:path";
+import { promisify } from "node:util";
+var execFileAsync = promisify(execFile);
+var CP850_MAP = {
+  \u00C7: 128,
+  \u00FC: 129,
+  \u00E9: 130,
+  \u00E2: 131,
+  \u00E4: 132,
+  \u00E0: 133,
+  \u00E5: 134,
+  \u00E7: 135,
+  \u00EA: 136,
+  \u00EB: 137,
+  \u00E8: 138,
+  \u00EF: 139,
+  \u00EE: 140,
+  \u00EC: 141,
+  \u00C4: 142,
+  \u00C5: 143,
+  \u00C9: 144,
+  \u00E6: 145,
+  \u00C6: 146,
+  \u00F4: 147,
+  \u00F6: 148,
+  \u00F2: 149,
+  \u00FB: 150,
+  \u00F9: 151,
+  \u00FF: 152,
+  \u00D6: 153,
+  \u00DC: 154,
+  \u00F8: 155,
+  "\xA3": 156,
+  \u00D8: 157,
+  "\xD7": 158,
+  \u0192: 159,
+  \u00E1: 160,
+  \u00ED: 161,
+  \u00F3: 162,
+  \u00FA: 163,
+  \u00F1: 164,
+  \u00D1: 165,
+  \u00AA: 166,
+  \u00BA: 167,
+  "\xBF": 168,
+  "\xAE": 169,
+  "\xAC": 170,
+  "\xBD": 171,
+  "\xBC": 172,
+  "\xA1": 173,
+  "\xAB": 174,
+  "\xBB": 175,
+  \u00C1: 181,
+  \u00C2: 182,
+  \u00C0: 183,
+  "\xA9": 184,
+  \u00E3: 198,
+  \u00C3: 199,
+  \u00CA: 210,
+  \u00CB: 211,
+  \u00C8: 212,
+  \u00CD: 214,
+  \u00CE: 215,
+  \u00CF: 216,
+  \u00D3: 224,
+  \u00DF: 225,
+  \u00D4: 226,
+  \u00D2: 227,
+  \u00F5: 228,
+  \u00D5: 229,
+  \u00DA: 233,
+  \u00DB: 234,
+  \u00D9: 235,
+  \u00FD: 236,
+  \u00DD: 237,
+  "\xB0": 248,
+  "\u2022": 42,
+  "\u2014": 45,
+  "\u2013": 45,
+  "\u2702": 45
+};
+function encodeCp850(text) {
+  const bytes = [];
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if (code >= 32 && code <= 126) {
+      bytes.push(code);
+    } else if (ch === "\n" || ch === "\r") {
+      bytes.push(code);
+    } else if (CP850_MAP[ch] !== void 0) {
+      bytes.push(CP850_MAP[ch]);
+    } else {
+      const normalized = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const fallback = normalized.charCodeAt(0);
+      bytes.push(fallback >= 32 && fallback <= 126 ? fallback : 63);
+    }
+  }
+  return Buffer.from(bytes);
+}
+function formatMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2).replace(".", ",")}`;
+}
+function wrapText(text, width) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const words = clean.split(" ");
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    if (!current) {
+      current = word.length > width ? word.slice(0, width) : word;
+      if (word.length > width) {
+        lines.push(current);
+        current = word.slice(width);
+      }
+    } else if (current.length + 1 + word.length <= width) {
+      current += ` ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+function lrLine(left, right, width) {
+  const r = right.trim();
+  const maxLeft = Math.max(1, width - r.length - 1);
+  const l = left.trim().slice(0, maxLeft);
+  const spaces = Math.max(1, width - l.length - r.length);
+  return `${l}${" ".repeat(spaces)}${r}`;
+}
+function buildEscPosReceipt(receipt, store, options = {}) {
+  const cols = options.widthMm === "58mm" ? 32 : 48;
+  const isCrediario = receipt.paymentMethod === "Credi\xE1rio";
+  const twoCopies = options.twoCopies !== void 0 ? options.twoCopies : isCrediario;
+  const chunks = [];
+  const pushRaw = (...bytes) => chunks.push(Buffer.from(bytes));
+  const pushText = (line = "") => chunks.push(encodeCp850(`${line}
+`));
+  const ESC = 27;
+  const GS = 29;
+  const initPrinter = () => {
+    pushRaw(ESC, 64);
+    pushRaw(ESC, 116, 2);
+  };
+  const alignLeft = () => pushRaw(ESC, 97, 0);
+  const alignCenter = () => pushRaw(ESC, 97, 1);
+  const boldOn = () => pushRaw(ESC, 69, 1);
+  const boldOff = () => pushRaw(ESC, 69, 0);
+  const sizeNormal = () => pushRaw(GS, 33, 0);
+  const sizeDouble = () => pushRaw(GS, 33, 17);
+  const sizeDoubleHeight = () => pushRaw(GS, 33, 1);
+  const cutPaper = () => {
+    pushRaw(10, 10, 10, 10);
+    pushRaw(GS, 86, 66, 3);
+  };
+  const sepDash = "-".repeat(cols);
+  const sepEq = "=".repeat(cols);
+  const renderVia = (viaLabel, requireSignature) => {
+    initPrinter();
+    alignCenter();
+    boldOn();
+    sizeDoubleHeight();
+    for (const line of wrapText((store.nome_fantasia || "Mercadinho do Geleia").toUpperCase(), cols)) {
+      pushText(line);
+    }
+    sizeNormal();
+    boldOff();
+    if (store.razao_social) {
+      for (const line of wrapText(store.razao_social, cols)) pushText(line);
+    }
+    if (store.cnpj) pushText(`CNPJ: ${store.cnpj}`);
+    if (store.inscricao_estadual) pushText(`IE: ${store.inscricao_estadual}`);
+    if (store.nome_proprietario) pushText(`Prop.: ${store.nome_proprietario}`);
+    if (store.telefone || store.whatsapp) {
+      const tel = store.telefone || store.whatsapp || "";
+      const extra = store.telefone && store.whatsapp && store.telefone !== store.whatsapp ? ` | WhatsApp: ${store.whatsapp}` : "";
+      for (const line of wrapText(`Tel: ${tel}${extra}`, cols)) pushText(line);
+    }
+    if (store.endereco) {
+      const addr = [
+        store.endereco,
+        store.numero ? `, ${store.numero}` : "",
+        store.bairro ? ` - ${store.bairro}` : "",
+        store.cidade ? `, ${store.cidade}` : "",
+        store.uf ? `/${store.uf}` : ""
+      ].join("");
+      for (const line of wrapText(addr, cols)) pushText(line);
+    }
+    pushText("");
+    boldOn();
+    pushText(`[ ${viaLabel.toUpperCase()} ]`);
+    boldOff();
+    alignLeft();
+    pushText(sepDash);
+    pushText(lrLine("CUPOM NAO FISCAL:", receipt.cupom, cols));
+    pushText(lrLine("DATA/HORA:", receipt.date, cols));
+    pushText(lrLine("OPERADOR:", receipt.operator, cols));
+    boldOn();
+    pushText(lrLine("PAGAMENTO:", receipt.paymentMethod.toUpperCase(), cols));
+    boldOff();
+    pushText(sepDash);
+    if (receipt.customer) {
+      boldOn();
+      for (const line of wrapText(`CLIENTE: ${receipt.customer.name.toUpperCase()}`, cols)) {
+        pushText(line);
+      }
+      boldOff();
+      if (receipt.customer.cpf) pushText(`CPF: ${receipt.customer.cpf}`);
+      if (receipt.customer.phone) pushText(`FONE: ${receipt.customer.phone}`);
+      if (isCrediario && receipt.customer.newDebt !== void 0) {
+        boldOn();
+        pushText(lrLine("SALDO CREDIARIO ATUAL:", formatMoney(receipt.customer.newDebt), cols));
+        boldOff();
+      }
+      pushText(sepDash);
+    }
+    boldOn();
+    pushText(lrLine("ITEM / QTD x UNIT", "TOTAL", cols));
+    boldOff();
+    pushText(sepDash);
+    receipt.items.forEach((item, idx) => {
+      const num = String(idx + 1).padStart(2, "0");
+      const titleLines = wrapText(`${num}. ${item.name}`, cols);
+      boldOn();
+      for (const line of titleLines) pushText(line);
+      boldOff();
+      const leftDetail = `  ${item.quantity} ${item.unit || "un"} x ${formatMoney(item.unitPrice)}`;
+      pushText(lrLine(leftDetail, formatMoney(item.subtotal), cols));
+    });
+    pushText(sepDash);
+    pushText(lrLine("SUBTOTAL:", formatMoney(receipt.subtotal), cols));
+    if (receipt.discount > 0) {
+      pushText(lrLine("DESCONTO:", `- ${formatMoney(receipt.discount)}`, cols));
+    }
+    pushText(sepEq);
+    boldOn();
+    sizeDoubleHeight();
+    pushText(lrLine("TOTAL:", formatMoney(receipt.total), cols));
+    sizeNormal();
+    boldOff();
+    pushText(sepEq);
+    if (receipt.paymentMethod === "Dinheiro" && receipt.cashReceived !== void 0 && receipt.cashReceived > 0) {
+      pushText(lrLine("VALOR RECEBIDO:", formatMoney(receipt.cashReceived), cols));
+      boldOn();
+      pushText(lrLine("TROCO:", formatMoney(receipt.changeDue || 0), cols));
+      boldOff();
+      pushText(sepDash);
+    }
+    if (requireSignature) {
+      pushText("");
+      const msg = isCrediario ? "Reconheco e confesso a divida referente aos itens acima descritos para pagamento no crediario." : "Confirmo o recebimento das mercadorias descritas neste cupom.";
+      alignCenter();
+      for (const line of wrapText(msg, cols)) pushText(line);
+      pushText("");
+      pushText("");
+      pushText("_".repeat(Math.min(36, cols - 4)));
+      boldOn();
+      pushText((receipt.customer?.name || "Assinatura do Cliente").toUpperCase().slice(0, cols));
+      boldOff();
+      if (receipt.customer?.cpf) pushText(`CPF: ${receipt.customer.cpf}`);
+      alignLeft();
+    } else {
+      pushText("");
+      alignCenter();
+      const footer = store.mensagem_cupom || "Obrigado pela preferencia! Volte sempre.";
+      for (const line of wrapText(footer, cols)) pushText(line);
+      alignLeft();
+    }
+    cutPaper();
+  };
+  if (isCrediario) {
+    renderVia("1a Via - Estabelecimento (Assinar)", true);
+    if (twoCopies) {
+      renderVia("2a Via - Cliente", false);
+    }
+  } else {
+    renderVia("Cupom Nao Fiscal", false);
+    if (twoCopies) {
+      renderVia("2a Via - Cliente", false);
+    }
+  }
+  return Buffer.concat(chunks);
+}
+async function listWindowsPrinters() {
+  if (process.platform !== "win32") {
+    return { supported: false, printers: [] };
+  }
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+$defaultName = (Get-CimInstance Win32_Printer -Filter "Default = True" | Select-Object -First 1 -ExpandProperty Name)
+$items = Get-Printer | ForEach-Object {
+  [PSCustomObject]@{
+    name = $_.Name
+    driverName = $_.DriverName
+    portName = $_.PortName
+    status = ($_.PrinterStatus -join ', ')
+    isDefault = ($_.Name -eq $defaultName)
+  }
+}
+$items | ConvertTo-Json -Compress
+`.trim();
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", psScript],
+    { timeout: 8e3 }
+  );
+  const trimmed = stdout.trim();
+  if (!trimmed) return { supported: true, printers: [] };
+  const parsed = JSON.parse(trimmed);
+  const list = Array.isArray(parsed) ? parsed : [parsed];
+  return { supported: true, printers: list };
+}
+async function sendRawToWindowsPrinter(printerName, rawBuffer) {
+  if (process.platform !== "win32") {
+    throw new Error("Impress\xE3o direta Windows Spooler dispon\xEDvel apenas em servidor Windows.");
+  }
+  if (!printerName.trim()) {
+    throw new Error("Nome da impressora n\xE3o configurado.");
+  }
+  const tmpFile = path2.join(
+    os.tmpdir(),
+    `geleia-escpos-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.bin`
+  );
+  await fs2.writeFile(tmpFile, rawBuffer);
+  const safePrinter = printerName.replace(/'/g, "''");
+  const safePath = tmpFile.replace(/'/g, "''");
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class RawPrinterHelper {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct DOCINFOA {
+    [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;
+    [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;
+    [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;
+  }
+
+  [DllImport("winspool.drv", EntryPoint = "OpenPrinterW", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool OpenPrinter(string src, out IntPtr hPrinter, IntPtr pd);
+
+  [DllImport("winspool.drv", SetLastError = true)]
+  public static extern bool ClosePrinter(IntPtr hPrinter);
+
+  [DllImport("winspool.drv", EntryPoint = "StartDocPrinterW", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool StartDocPrinter(IntPtr hPrinter, int level, ref DOCINFOA di);
+
+  [DllImport("winspool.drv", SetLastError = true)]
+  public static extern bool EndDocPrinter(IntPtr hPrinter);
+
+  [DllImport("winspool.drv", SetLastError = true)]
+  public static extern bool StartPagePrinter(IntPtr hPrinter);
+
+  [DllImport("winspool.drv", SetLastError = true)]
+  public static extern bool EndPagePrinter(IntPtr hPrinter);
+
+  [DllImport("winspool.drv", SetLastError = true)]
+  public static extern bool WritePrinter(IntPtr hPrinter, byte[] pBytes, int dwCount, out int dwWritten);
+
+  public static void SendBytesToPrinter(string printerName, byte[] bytes) {
+    IntPtr hPrinter;
+    if (!OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
+      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    }
+    try {
+      var di = new DOCINFOA { pDocName = "Cupom Mercadinho do Geleia", pDataType = "RAW" };
+      if (!StartDocPrinter(hPrinter, 1, ref di)) {
+        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+      }
+      try {
+        if (!StartPagePrinter(hPrinter)) {
+          throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try {
+          int written;
+          if (!WritePrinter(hPrinter, bytes, bytes.Length, out written) || written != bytes.Length) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+          }
+        } finally {
+          EndPagePrinter(hPrinter);
+        }
+      } finally {
+        EndDocPrinter(hPrinter);
+      }
+    } finally {
+      ClosePrinter(hPrinter);
+    }
+  }
+}
+"@
+$bytes = [System.IO.File]::ReadAllBytes('${safePath}')
+[RawPrinterHelper]::SendBytesToPrinter('${safePrinter}', $bytes)
+`.trim();
+  try {
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", psScript],
+      { timeout: 15e3 }
+    );
+  } finally {
+    await fs2.unlink(tmpFile).catch(() => {
+    });
+  }
+}
+
+// server/routes/print.ts
+var printRouter = Router6();
+printRouter.get("/printers", requireAuth, async (_req, res) => {
+  try {
+    const result = await listWindowsPrinters();
+    res.json(result);
+  } catch (err) {
+    res.json({
+      supported: process.platform === "win32",
+      printers: [],
+      error: err.message
+    });
+  }
+});
+printRouter.post("/receipt", requireAuth, async (req, res) => {
+  try {
+    const { receipt, twoCopies = true, printerName: bodyPrinter, width: bodyWidth } = req.body;
+    if (!receipt || !Array.isArray(receipt.items)) {
+      res.status(400).json({ error: "Dados do cupom inv\xE1lidos." });
+      return;
+    }
+    if (process.platform !== "win32") {
+      res.status(200).json({
+        ok: false,
+        fallbackBrowser: true,
+        error: "Impress\xE3o direta dispon\xEDvel apenas no servidor local Windows."
+      });
+      return;
+    }
+    const [cfgRes, companyRes] = await Promise.all([
+      pool.query("SELECT nome_impressora, largura_bobina FROM configuracoes WHERE id = 1"),
+      pool.query("SELECT * FROM dados_empresa WHERE id = 1")
+    ]);
+    const cfg = cfgRes.rows[0] ?? {};
+    const store = companyRes.rows[0] ?? {};
+    const targetPrinter = (bodyPrinter || cfg.nome_impressora || "VOX(U) 1").trim();
+    const widthMm = (bodyWidth || cfg.largura_bobina) === "58mm" ? "58mm" : "80mm";
+    const raw = buildEscPosReceipt(receipt, store, {
+      twoCopies: Boolean(twoCopies),
+      widthMm
+    });
+    await sendRawToWindowsPrinter(targetPrinter, raw);
+    res.json({ ok: true, printerName: targetPrinter, widthMm });
+  } catch (err) {
+    res.status(200).json({
+      ok: false,
+      fallbackBrowser: true,
+      error: err.message
+    });
+  }
+});
+printRouter.post("/test", requireAuth, async (req, res) => {
+  try {
+    if (process.platform !== "win32") {
+      res.status(400).json({ error: "Impress\xE3o de teste direta dispon\xEDvel apenas no Windows." });
+      return;
+    }
+    const { printerName: bodyPrinter, width: bodyWidth } = req.body ?? {};
+    const [cfgRes, companyRes] = await Promise.all([
+      pool.query("SELECT nome_impressora, largura_bobina FROM configuracoes WHERE id = 1"),
+      pool.query("SELECT * FROM dados_empresa WHERE id = 1")
+    ]);
+    const cfg = cfgRes.rows[0] ?? {};
+    const store = companyRes.rows[0] ?? {};
+    const targetPrinter = (bodyPrinter || cfg.nome_impressora || "VOX(U) 1").trim();
+    const widthMm = (bodyWidth || cfg.largura_bobina) === "58mm" ? "58mm" : "80mm";
+    const nowStr = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "short",
+      timeStyle: "short"
+    }).format(/* @__PURE__ */ new Date());
+    const testReceipt = {
+      cupom: "TESTE-0001",
+      date: nowStr,
+      operator: req.user?.name || "Sistema",
+      paymentMethod: "Dinheiro",
+      items: [
+        { name: "Teste de Impressao Termica", quantity: 1, unit: "un", unitPrice: 1, subtotal: 1 },
+        { name: "Acentuacao: A E I O U C a e i o u c", quantity: 1, unit: "un", unitPrice: 0, subtotal: 0 }
+      ],
+      subtotal: 1,
+      discount: 0,
+      total: 1,
+      cashReceived: 1,
+      changeDue: 0
+    };
+    const raw = buildEscPosReceipt(testReceipt, store, {
+      twoCopies: false,
+      widthMm
+    });
+    await sendRawToWindowsPrinter(targetPrinter, raw);
+    res.json({ ok: true, printerName: targetPrinter, widthMm });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // server/index.ts
 var app = express();
 app.disable("x-powered-by");
@@ -2236,6 +2756,7 @@ app.use("/api", catalogRouter);
 app.use("/api", salesAndPdvRouter);
 app.use("/api", partnersAndFinanceRouter);
 app.use("/api", notificationsRouter);
+app.use("/api/print", printRouter);
 var port = Number(process.env.PORT ?? 3001);
 var dbInitPromise = null;
 function ensureDbInitialized() {

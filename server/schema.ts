@@ -35,6 +35,11 @@ export async function initDatabase() {
     'ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS meta_diaria_faturamento NUMERIC(10,2) NOT NULL DEFAULT 5800.00'
   );
   await pool.query(
+    `UPDATE configuracoes
+     SET nome_impressora = 'VOX(U) 1'
+     WHERE id = 1 AND (nome_impressora IS NULL OR nome_impressora = '' OR nome_impressora = 'EPSON TM-T20X — Balcão 01')`
+  );
+  await pool.query(
     'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0'
   );
   await pool.query(

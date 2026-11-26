@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS configuracoes (
     endereco_cupom VARCHAR(255),
     logo_url TEXT,
     largura_bobina largura_bobina_enum NOT NULL DEFAULT '80mm',
-    nome_impressora VARCHAR(150) DEFAULT 'EPSON TM-T20X — Balcão 01',
+    nome_impressora VARCHAR(150) DEFAULT 'VOX(U) 1',
     impressao_automatica impressao_auto_enum NOT NULL DEFAULT 'SEMPRE',
     mensagem_rodape_cupom TEXT DEFAULT 'Obrigado pela preferência! Volte sempre ao Mercadinho do Geleia.',
     exigir_abertura_caixa BOOLEAN NOT NULL DEFAULT TRUE,

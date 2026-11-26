@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
 import type { CompanyData, PaymentMethod } from '../types/erp';
@@ -42,6 +42,10 @@ interface ReceiptModalProps {
 export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: ReceiptModalProps) {
   const { company } = useErp();
   const [twoCopies, setTwoCopies] = useState(true);
+  const [bobinaWidth, setBobinaWidth] = useState<'80mm' | '58mm'>('80mm');
+  const [printerName, setPrinterName] = useState<string>('VOX(U) 1');
+  const [printing, setPrinting] = useState(false);
+  const [printStatus, setPrintStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [store, setStore] = useState<Partial<CompanyData>>({
     nome_fantasia: 'Mercadinho do Geleia',
     razao_social: '',
@@ -54,7 +58,22 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
 
   useEffect(() => {
     if (!open) return;
-    setTwoCopies(true);
+    setTwoCopies(receipt?.paymentMethod === 'Crediário');
+    setPrintStatus(null);
+    fetch('/api/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.config?.largura_bobina === '58mm') {
+          setBobinaWidth('58mm');
+        } else {
+          setBobinaWidth('80mm');
+        }
+        if (data?.config?.nome_impressora) {
+          setPrinterName(data.config.nome_impressora);
+        }
+      })
+      .catch(() => {});
+
     if (company) {
       setStore(company);
       return;
@@ -67,13 +86,55 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
       .catch(() => {});
   }, [open, company]);
 
+  const handlePrint = useCallback(
+    async (copies: boolean) => {
+      if (!receipt) return;
+      setPrinting(true);
+      setPrintStatus(null);
+      try {
+        const res = await fetch('/api/print/receipt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            receipt,
+            twoCopies: copies,
+            printerName,
+            width: bobinaWidth,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.ok) {
+          setPrintStatus({
+            ok: true,
+            text: `Cupom enviado para "${data.printerName}"!`,
+          });
+          return;
+        }
+        if (data?.fallbackBrowser) {
+          window.print();
+          return;
+        }
+        setPrintStatus({
+          ok: false,
+          text: data?.error || 'Falha na impressão direta. Usando navegador...',
+        });
+        window.print();
+      } catch {
+        window.print();
+      } finally {
+        setPrinting(false);
+      }
+    },
+    [receipt, printerName, bobinaWidth]
+  );
+
   useEffect(() => {
     if (!open || !receipt || !autoPrint) return;
     const timer = setTimeout(() => {
-      window.print();
+      void handlePrint(true);
     }, 180);
     return () => clearTimeout(timer);
-  }, [open, receipt, autoPrint]);
+  }, [open, receipt, autoPrint, handlePrint]);
 
   if (!open || !receipt) return null;
 
@@ -292,18 +353,38 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
 
           <button
             type="button"
-            onClick={() => window.print()}
-            className="px-4 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5 shadow-sm"
+            disabled={printing}
+            onClick={() => void handlePrint(twoCopies)}
+            className="px-4 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-60 text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5 shadow-sm"
           >
             <span className="material-symbols-outlined text-[18px]">print</span>
-            <span>Imprimir {twoCopies ? '2 Vias' : 'Cupom'}</span>
+            <span>{printing ? 'Enviando...' : `Imprimir ${twoCopies ? '2 Vias' : 'Cupom'}`}</span>
           </button>
         </div>
 
+        {printStatus && (
+          <div
+            className={`no-print px-5 py-2 text-xs font-bold border-b ${
+              printStatus.ok
+                ? 'bg-tertiary-fixed/40 border-tertiary-fixed-dim text-tertiary'
+                : 'bg-error-container/40 border-error/30 text-error'
+            }`}
+          >
+            {printStatus.text}
+          </div>
+        )}
+
         {/* Área Imprimível */}
         <div className="flex-1 overflow-y-auto p-5 bg-slate-100">
-          <div className="receipt-print-area max-w-[340px] mx-auto space-y-4">
-            {renderVia('1ª Via — Estabelecimento (Assinar)', true)}
+          <div
+            className={`receipt-print-area ${
+              bobinaWidth === '58mm' ? 'bobina-58mm max-w-[260px]' : 'max-w-[340px]'
+            } mx-auto space-y-4`}
+          >
+            {renderVia(
+              isCrediario ? '1ª Via — Estabelecimento (Assinar)' : 'Cupom Não Fiscal',
+              isCrediario
+            )}
 
             {twoCopies && (
               <>
@@ -319,22 +400,32 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
         </div>
 
         {/* Rodapé do Modal (não sai na impressão) */}
-        <div className="no-print px-5 py-3 border-t border-surface-container bg-white flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-slate-200 font-label-md font-bold hover:bg-surface-container-low"
-          >
-            Fechar
-          </button>
+        <div className="no-print px-5 py-3 border-t border-surface-container bg-white flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => window.print()}
-            className="px-5 py-2 rounded-lg bg-primary-container text-white font-label-md font-bold flex items-center gap-1.5"
+            className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-on-surface-variant hover:bg-surface-container-low"
           >
-            <span className="material-symbols-outlined text-[18px]">print</span>
-            <span>Imprimir Agora</span>
+            Diálogo do Navegador
           </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-slate-200 font-label-md font-bold hover:bg-surface-container-low"
+            >
+              Fechar
+            </button>
+            <button
+              type="button"
+              disabled={printing}
+              onClick={() => void handlePrint(twoCopies)}
+              className="px-5 py-2 rounded-lg bg-primary-container disabled:opacity-60 text-white font-label-md font-bold flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[18px]">print</span>
+              <span>{printing ? 'Enviando...' : 'Imprimir Agora'}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

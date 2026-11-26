@@ -7,6 +7,7 @@ import { catalogRouter } from './routes/catalog.ts';
 import { salesAndPdvRouter } from './routes/salesAndPdv.ts';
 import { partnersAndFinanceRouter } from './routes/partnersAndFinance.ts';
 import { notificationsRouter } from './routes/notifications.ts';
+import { printRouter } from './routes/print.ts';
 import { requireAuth, safeErrorMessage, securityHeaders } from './utils/security.ts';
 
 export const app = express();
@@ -261,6 +262,7 @@ app.use('/api', catalogRouter);
 app.use('/api', salesAndPdvRouter);
 app.use('/api', partnersAndFinanceRouter);
 app.use('/api', notificationsRouter);
+app.use('/api/print', printRouter);
 
 const port = Number(process.env.PORT ?? 3001);
 

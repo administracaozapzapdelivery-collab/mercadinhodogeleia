@@ -341,6 +341,7 @@ authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE')
         registrar_log_auditoria = COALESCE($9, registrar_log_auditoria),
         recalcular_custo_medio = COALESCE($10, recalcular_custo_medio),
         meta_diaria_faturamento = COALESCE($11, meta_diaria_faturamento),
+        nome_impressora = COALESCE($12, nome_impressora),
         updated_at = NOW()
        WHERE id = 1`,
       [
@@ -355,6 +356,7 @@ authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE')
         c.registrar_log_auditoria ?? null,
         c.recalcular_custo_medio ?? null,
         c.meta_diaria_faturamento != null ? Number(c.meta_diaria_faturamento) : null,
+        c.nome_impressora ?? null,
       ]
     );
     res.json({ ok: true });

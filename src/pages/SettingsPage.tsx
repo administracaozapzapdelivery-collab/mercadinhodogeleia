@@ -15,6 +15,7 @@ interface ConfigState {
   nome_fantasia: string;
   cnpj: string;
   telefone_whatsapp: string;
+  nome_impressora: string;
   largura_bobina: string;
   impressao_automatica: string;
   dias_alerta_validade: number;
@@ -22,6 +23,14 @@ interface ConfigState {
   exigir_abertura_caixa: boolean;
   registrar_log_auditoria: boolean;
   meta_diaria_faturamento: number;
+}
+
+interface PrinterOption {
+  name: string;
+  driverName: string;
+  portName: string;
+  status: string;
+  isDefault: boolean;
 }
 
 interface BackupRow {
@@ -40,6 +49,7 @@ export function SettingsPage() {
     nome_fantasia: 'Mercadinho do Geleia',
     cnpj: '48.123.456/0001-99',
     telefone_whatsapp: '(11) 99444-1234',
+    nome_impressora: 'VOX(U) 1',
     largura_bobina: '80mm',
     impressao_automatica: 'SEMPRE',
     dias_alerta_validade: 15,
@@ -48,9 +58,29 @@ export function SettingsPage() {
     registrar_log_auditoria: true,
     meta_diaria_faturamento: 5800,
   });
+  const [printers, setPrinters] = useState<PrinterOption[]>([]);
+  const [printersSupported, setPrintersSupported] = useState<boolean>(true);
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const [testPrintStatus, setTestPrintStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testingPrint, setTestingPrint] = useState(false);
 
   const cnpjErr = submitted && cfg.cnpj ? cnpjError(cfg.cnpj) : '';
   const phoneErr = submitted && cfg.telefone_whatsapp ? phoneError(cfg.telefone_whatsapp) : '';
+
+  const loadPrinters = () => {
+    setLoadingPrinters(true);
+    fetch('/api/print/printers')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setPrintersSupported(Boolean(data.supported));
+        if (Array.isArray(data.printers)) {
+          setPrinters(data.printers);
+        }
+      })
+      .catch(() => null)
+      .finally(() => setLoadingPrinters(false));
+  };
 
   useEffect(() => {
     fetch('/api/settings')
@@ -60,7 +90,39 @@ export function SettingsPage() {
         if (data?.backups) setBackups(data.backups);
       })
       .catch(() => null);
+    loadPrinters();
   }, []);
+
+  async function handleTestPrint() {
+    setTestingPrint(true);
+    setTestPrintStatus(null);
+    try {
+      const res = await fetch('/api/print/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          printerName: cfg.nome_impressora,
+          width: cfg.largura_bobina,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setTestPrintStatus({
+          ok: true,
+          text: `Página de teste enviada para "${data.printerName}" (${data.widthMm})!`,
+        });
+      } else {
+        setTestPrintStatus({
+          ok: false,
+          text: data.error || 'Falha ao enviar impressão de teste.',
+        });
+      }
+    } catch (err) {
+      setTestPrintStatus({ ok: false, text: (err as Error).message });
+    } finally {
+      setTestingPrint(false);
+    }
+  }
 
   async function handleSave() {
     setSubmitted(true);
@@ -178,39 +240,110 @@ export function SettingsPage() {
         )}
 
         {activeTab === 'pdv' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-label-md mb-1">Impressora Térmica Padrão</label>
-              <select
-                value={cfg.largura_bobina}
-                onChange={(e) => setCfg({ ...cfg, largura_bobina: e.target.value })}
-                className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white"
-              >
-                <option value="80mm">Bobina Térmica 80mm</option>
-                <option value="58mm">Bobina Térmica 58mm</option>
-              </select>
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-label-md">Impressora Térmica Padrão (Windows)</label>
+                  <button
+                    type="button"
+                    onClick={loadPrinters}
+                    disabled={loadingPrinters}
+                    className="text-xs font-bold text-primary-container hover:underline flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">refresh</span>
+                    <span>{loadingPrinters ? 'Atualizando...' : 'Atualizar lista'}</span>
+                  </button>
+                </div>
+                {printers.length > 0 ? (
+                  <select
+                    value={cfg.nome_impressora ?? 'VOX(U) 1'}
+                    onChange={(e) => setCfg({ ...cfg, nome_impressora: e.target.value })}
+                    className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white"
+                  >
+                    {!printers.some((p) => p.name === cfg.nome_impressora) && cfg.nome_impressora && (
+                      <option value={cfg.nome_impressora}>{cfg.nome_impressora} (Salva)</option>
+                    )}
+                    {printers.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name}
+                        {p.isDefault ? ' (Padrão do Windows)' : ''} — {p.portName}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={cfg.nome_impressora ?? 'VOX(U) 1'}
+                    onChange={(e) => setCfg({ ...cfg, nome_impressora: e.target.value })}
+                    placeholder="VOX(U) 1"
+                    className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                  />
+                )}
+                <p className="font-body-sm text-on-surface-variant mt-1">
+                  {printersSupported
+                    ? 'Impressão direta ESC/POS via Spooler do Windows (sem abrir janela do navegador).'
+                    : 'Servidor remoto detectado: será usado o diálogo de impressão do navegador.'}
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-label-md mb-1">Largura da Bobina</label>
+                <select
+                  value={cfg.largura_bobina}
+                  onChange={(e) => setCfg({ ...cfg, largura_bobina: e.target.value })}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white"
+                >
+                  <option value="80mm">Bobina Térmica 80mm (48 colunas)</option>
+                  <option value="58mm">Bobina Térmica 58mm (32 colunas)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-label-md mb-1">Impressão Automática ao Finalizar</label>
+                <select
+                  value={cfg.impressao_automatica}
+                  onChange={(e) => setCfg({ ...cfg, impressao_automatica: e.target.value })}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white"
+                >
+                  <option value="SEMPRE">Sempre imprimir</option>
+                  <option value="PERGUNTAR">Perguntar antes</option>
+                  <option value="NUNCA">Nunca</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block font-label-md mb-1">Impressão Automática ao Finalizar</label>
-              <select
-                value={cfg.impressao_automatica}
-                onChange={(e) => setCfg({ ...cfg, impressao_automatica: e.target.value })}
-                className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white"
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+              <label className="flex items-center gap-2 font-label-md">
+                <input
+                  type="checkbox"
+                  checked={cfg.exigir_abertura_caixa}
+                  onChange={(e) => setCfg({ ...cfg, exigir_abertura_caixa: e.target.checked })}
+                  className="w-4 h-4 accent-primary-container"
+                />
+                Exigir caixa aberto para vender no PDV
+              </label>
+
+              <button
+                type="button"
+                onClick={() => void handleTestPrint()}
+                disabled={testingPrint || !printersSupported}
+                className="px-4 py-2 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-50 text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5 shadow-sm"
               >
-                <option value="SEMPRE">Sempre imprimir</option>
-                <option value="PERGUNTAR">Perguntar antes</option>
-                <option value="NUNCA">Nunca</option>
-              </select>
+                <span className="material-symbols-outlined text-[18px]">print</span>
+                <span>{testingPrint ? 'Imprimindo...' : 'Imprimir Página de Teste'}</span>
+              </button>
             </div>
-            <label className="flex items-center gap-2 font-label-md">
-              <input
-                type="checkbox"
-                checked={cfg.exigir_abertura_caixa}
-                onChange={(e) => setCfg({ ...cfg, exigir_abertura_caixa: e.target.checked })}
-                className="w-4 h-4 accent-primary-container"
-              />
-              Exigir caixa aberto para vender no PDV
-            </label>
+
+            {testPrintStatus && (
+              <div
+                className={`p-3 rounded-xl border font-label-md font-bold ${
+                  testPrintStatus.ok
+                    ? 'bg-tertiary-fixed/40 border-tertiary-fixed-dim text-tertiary'
+                    : 'bg-error-container/40 border-error/30 text-error'
+                }`}
+              >
+                {testPrintStatus.text}
+              </div>
+            )}
           </div>
         )}
 

@@ -4,7 +4,7 @@ import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
 import type { PaymentMethod, Product } from '../types/erp';
 import { Modal, PasswordInput } from '../components/ui/SharedUI';
-import { ReceiptModal, type ReceiptData } from '../components/ReceiptModal';
+import type { ReceiptData } from '../components/ReceiptModal';
 import { maskCpf, maskPhone, cpfError, phoneError } from '../utils/masks';
 
 interface CartItem {
@@ -53,8 +53,9 @@ export function PdvPage() {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
-  const [receiptOpen, setReceiptOpen] = useState(false);
-  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
+  const [printConfirmOpen, setPrintConfirmOpen] = useState(false);
+  const [printingReceipt, setPrintingReceipt] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [authorizerPin, setAuthorizerPin] = useState('');
@@ -63,6 +64,33 @@ export function PdvPage() {
 
   const todayBr = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const openShift = shifts.find((s) => s.status === 'Aberto' && s.openedAt?.startsWith(todayBr));
+
+  async function handleConfirmPrintReceipt(targetReceipt: ReceiptData) {
+    setPrintingReceipt(true);
+    setPrintError(null);
+    try {
+      const twoCopies = targetReceipt.paymentMethod === 'Crediário';
+      const res = await fetch('/api/print/receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receipt: targetReceipt,
+          twoCopies,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        setPrintConfirmOpen(false);
+        scannerRef.current?.focus();
+        return;
+      }
+      setPrintError(data?.error || 'Não foi possível enviar para a impressora.');
+    } catch (err) {
+      setPrintError((err as Error).message || 'Erro de comunicação com a impressora.');
+    } finally {
+      setPrintingReceipt(false);
+    }
+  }
 
   useEffect(() => {
     if (feedback?.type !== 'err') return;
@@ -251,8 +279,8 @@ export function PdvPage() {
             : undefined,
       };
       setLastReceipt(receiptPayload);
-      setAutoPrintReceipt(true);
-      setReceiptOpen(true);
+      setPrintError(null);
+      setPrintConfirmOpen(true);
 
       const trocoInfo = changeDue > 0 ? ` • Troco: ${formatBRL(changeDue)}` : '';
       const authInfo = body.authorizedBy ? ` • Autorizado por ${body.authorizedBy}` : '';
@@ -303,7 +331,7 @@ export function PdvPage() {
         scannerRef.current?.focus();
       } else if (e.key === 'F4') {
         e.preventDefault();
-        if (!checkoutOpen && !crediarioModalOpen && !switchOpen && !receiptOpen) {
+        if (!checkoutOpen && !crediarioModalOpen && !switchOpen && !printConfirmOpen) {
           openCheckoutModal();
         }
       } else if (e.key === 'F8') {
@@ -315,7 +343,7 @@ export function PdvPage() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [checkoutOpen, crediarioModalOpen, switchOpen, receiptOpen, openCheckoutModal]);
+  }, [checkoutOpen, crediarioModalOpen, switchOpen, printConfirmOpen, openCheckoutModal]);
 
   return (
     <div className="h-screen bg-surface flex flex-col overflow-hidden">
@@ -580,13 +608,13 @@ export function PdvPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAutoPrintReceipt(false);
-                      setReceiptOpen(true);
+                      setPrintError(null);
+                      setPrintConfirmOpen(true);
                     }}
                     className="px-3 py-1.5 rounded-lg bg-primary-container text-white font-label-sm font-bold shrink-0 flex items-center gap-1 hover:opacity-90"
                   >
                     <span className="material-symbols-outlined text-[16px]">print</span>
-                    <span>Imprimir (2 Vias)</span>
+                    <span>Imprimir Cupom</span>
                   </button>
                 )}
               </div>
@@ -1266,16 +1294,79 @@ export function PdvPage() {
         </div>
       </Modal>
 
-      <ReceiptModal
-        open={receiptOpen}
-        receipt={lastReceipt}
-        autoPrint={autoPrintReceipt}
+      <Modal
+        open={printConfirmOpen && Boolean(lastReceipt)}
+        title="Venda Concluída"
         onClose={() => {
-          setReceiptOpen(false);
-          setAutoPrintReceipt(false);
+          setPrintConfirmOpen(false);
+          setPrintError(null);
           scannerRef.current?.focus();
         }}
-      />
+      >
+        {lastReceipt && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-tertiary-fixed/30 border border-tertiary-fixed-dim flex items-center justify-between gap-3">
+              <div>
+                <p className="font-label-sm text-on-surface-variant">
+                  Cupom {lastReceipt.cupom} • {lastReceipt.paymentMethod}
+                </p>
+                <p className="font-headline-sm font-extrabold text-tertiary">
+                  {formatBRL(lastReceipt.total)}
+                </p>
+                {lastReceipt.paymentMethod === 'Dinheiro' &&
+                  lastReceipt.changeDue !== undefined &&
+                  lastReceipt.changeDue > 0 && (
+                    <p className="font-label-md font-bold text-on-surface mt-0.5">
+                      Troco: {formatBRL(lastReceipt.changeDue)}
+                    </p>
+                  )}
+              </div>
+              <span className="material-symbols-outlined text-[36px] text-tertiary">
+                check_circle
+              </span>
+            </div>
+
+            <p className="font-body-md font-semibold text-on-surface">
+              Deseja imprimir o cupom desta venda agora?
+            </p>
+            <p className="font-body-sm text-on-surface-variant">
+              {lastReceipt.paymentMethod === 'Crediário'
+                ? 'Crediário: serão impressas 2 vias (1ª via com assinatura do cliente + 2ª via do cliente).'
+                : 'Será impressa 1 via do cupom não fiscal (sem assinatura).'}
+            </p>
+
+            {printError && (
+              <div className="p-3 rounded-lg bg-error-container/40 border border-error/30 text-error font-label-md font-bold">
+                {printError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={printingReceipt}
+                onClick={() => {
+                  setPrintConfirmOpen(false);
+                  setPrintError(null);
+                  scannerRef.current?.focus();
+                }}
+                className="px-5 py-2.5 rounded-lg border border-slate-200 font-label-md font-bold hover:bg-surface-container-low"
+              >
+                Não
+              </button>
+              <button
+                type="button"
+                disabled={printingReceipt}
+                onClick={() => void handleConfirmPrintReceipt(lastReceipt)}
+                className="px-5 py-2.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-60 text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">print</span>
+                <span>{printingReceipt ? 'Imprimindo...' : 'Sim, Imprimir'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
