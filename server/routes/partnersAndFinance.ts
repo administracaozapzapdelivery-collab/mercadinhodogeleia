@@ -85,6 +85,17 @@ partnersAndFinanceRouter.delete('/customers/:id', requireAuth, requireRole('ADMI
       res.status(400).json({ error: 'ID inválido.' });
       return;
     }
+    const existing = await pool.query<{ nome: string }>(
+      'SELECT nome FROM clientes WHERE id = $1',
+      [id]
+    );
+    const nome = (existing.rows[0]?.nome ?? '').trim().toLowerCase();
+    if (nome === 'venda no balcão' || nome === 'vendas no balcão') {
+      res.status(403).json({
+        error: 'O cliente padrão "Venda no Balcão" não pode ser excluído.',
+      });
+      return;
+    }
     await pool.query('DELETE FROM clientes WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch {

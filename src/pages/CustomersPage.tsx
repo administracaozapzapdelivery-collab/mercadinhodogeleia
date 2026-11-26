@@ -23,6 +23,11 @@ const CUSTOMER_FILTER_LABELS: Record<Exclude<CustomerQuickFilter, 'all'>, string
   bloqueado: 'Bloqueados',
 };
 
+function isProtectedBalcaoCustomer(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  return normalized === 'venda no balcão' || normalized === 'vendas no balcão';
+}
+
 export function CustomersPage() {
   const navigate = useNavigate();
   const { customers, deleteCustomer, refreshData } = useErp();
@@ -352,50 +357,64 @@ export function CustomersPage() {
                 </td>
               </tr>
             ) : (
-              filtered.map((c) => (
-              <tr key={c.id} className="hover:bg-surface-container-low/50">
-                <td className="px-space-lg py-3">
-                  <p className="font-label-lg font-bold text-on-surface">{c.name}</p>
-                  <p className="font-body-sm text-on-surface-variant">{c.cpf}</p>
-                </td>
-                <td className="px-space-lg py-3">{c.phone}</td>
-                <td className="px-space-lg py-3 text-right tabular-nums">{formatBRL(c.creditLimit)}</td>
-                <td className="px-space-lg py-3 text-right font-label-lg font-bold text-primary tabular-nums">
-                  {formatBRL(c.currentDebt)}
-                </td>
-                <td className="px-space-lg py-3">
-                  <StatusBadge
-                    label={c.status}
-                    tone={
-                      c.status === 'Em dia'
-                        ? 'success'
-                        : c.status === 'Atenção'
-                        ? 'warning'
-                        : 'danger'
-                    }
-                  />
-                </td>
-                <td className="px-space-lg py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={() => void openFiado(c)}
-                    className="px-3 py-1.5 rounded-lg bg-primary-fixed text-primary-container font-label-sm font-bold hover:bg-primary-fixed-dim"
-                  >
-                    Receber / Extrato
-                  </button>
-                </td>
-                <td className="px-space-lg py-3 text-right">
-                  <CrudActionButtons
-                    onView={() => setViewItem(c)}
-                    onEdit={() => navigate(`/clientes/${c.id}/editar`)}
-                    onDelete={() => {
-                      setDeleteErr(null);
-                      setDeleteTarget(c);
-                    }}
-                  />
-                </td>
-              </tr>
-              ))
+              filtered.map((c) => {
+                const isProtected = isProtectedBalcaoCustomer(c.name);
+                return (
+                  <tr key={c.id} className="hover:bg-surface-container-low/50">
+                    <td className="px-space-lg py-3">
+                      <div className="flex items-center gap-2">
+                        <p className="font-label-lg font-bold text-on-surface">{c.name}</p>
+                        {isProtected && (
+                          <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-primary-container font-label-sm font-bold">
+                            Padrão PDV
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-body-sm text-on-surface-variant">{c.cpf}</p>
+                    </td>
+                    <td className="px-space-lg py-3">{c.phone}</td>
+                    <td className="px-space-lg py-3 text-right tabular-nums">{formatBRL(c.creditLimit)}</td>
+                    <td className="px-space-lg py-3 text-right font-label-lg font-bold text-primary tabular-nums">
+                      {formatBRL(c.currentDebt)}
+                    </td>
+                    <td className="px-space-lg py-3">
+                      <StatusBadge
+                        label={c.status}
+                        tone={
+                          c.status === 'Em dia'
+                            ? 'success'
+                            : c.status === 'Atenção'
+                            ? 'warning'
+                            : 'danger'
+                        }
+                      />
+                    </td>
+                    <td className="px-space-lg py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => void openFiado(c)}
+                        className="px-3 py-1.5 rounded-lg bg-primary-fixed text-primary-container font-label-sm font-bold hover:bg-primary-fixed-dim"
+                      >
+                        Receber / Extrato
+                      </button>
+                    </td>
+                    <td className="px-space-lg py-3 text-right">
+                      <CrudActionButtons
+                        onView={() => setViewItem(c)}
+                        onEdit={() => navigate(`/clientes/${c.id}/editar`)}
+                        onDelete={
+                          isProtected
+                            ? undefined
+                            : () => {
+                                setDeleteErr(null);
+                                setDeleteTarget(c);
+                              }
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

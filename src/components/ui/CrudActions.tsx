@@ -4,7 +4,7 @@ import { Modal } from './SharedUI';
 interface CrudActionButtonsProps {
   onView: () => void;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   extra?: ReactNode;
 }
 
@@ -30,15 +30,17 @@ export function CrudActionButtons({ onView, onEdit, onDelete, extra }: CrudActio
       >
         <span className="material-symbols-outlined text-[18px]">edit</span>
       </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        className="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center justify-center transition-colors"
-        title="Excluir"
-        aria-label="Excluir"
-      >
-        <span className="material-symbols-outlined text-[18px]">delete</span>
-      </button>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center justify-center transition-colors"
+          title="Excluir"
+          aria-label="Excluir"
+        >
+          <span className="material-symbols-outlined text-[18px]">delete</span>
+        </button>
+      )}
     </div>
   );
 }
