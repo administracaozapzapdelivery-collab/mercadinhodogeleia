@@ -60,17 +60,6 @@ async function initDatabase() {
   await pool.query(
     "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mp_access_token TEXT"
   );
-  await pool.query(
-    `UPDATE configuracoes
-     SET mp_pix_ativo = TRUE,
-         mp_public_key = COALESCE(NULLIF(mp_public_key, ''), $1),
-         mp_access_token = COALESCE(NULLIF(mp_access_token, ''), $2)
-     WHERE id = 1 AND (mp_access_token IS NULL OR mp_access_token = '')`,
-    [
-      "APP_USR-0ac51a93-601e-4b68-b47e-2c2210e5296e",
-      "APP_USR-6816043027376004-112609-9b2762d1ed0bb638bb63b6778a056be7-3879037648"
-    ]
-  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS mp_pix_pagamentos (
       payment_id VARCHAR(64) PRIMARY KEY,
