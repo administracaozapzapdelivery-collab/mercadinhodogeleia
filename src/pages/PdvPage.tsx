@@ -23,7 +23,7 @@ const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
 
 export function PdvPage() {
   const navigate = useNavigate();
-  const { products, categories, customers, shifts, currentUser, company, login, logout, addCustomer, refreshData } = useErp();
+  const { products, customers, shifts, currentUser, company, login, logout, addCustomer, refreshData } = useErp();
   const scannerRef = useRef<HTMLInputElement>(null);
 
   const [switchOpen, setSwitchOpen] = useState(false);
@@ -43,7 +43,6 @@ export function PdvPage() {
   const [cliError, setCliError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [qtyMultiplier, setQtyMultiplier] = useState<number>(1);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<string>('0');
@@ -110,14 +109,13 @@ export function PdvPage() {
   }, [feedback]);
 
   const filteredProducts = products.filter((p) => {
-    const matchesCat = selectedCategory === 'Todos' || p.category === selectedCategory;
     const q = query.trim().toLowerCase();
-    const matchesQuery =
+    return (
       !q ||
       p.name.toLowerCase().includes(q) ||
       p.barcode.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q);
-    return matchesCat && matchesQuery;
+      p.sku.toLowerCase().includes(q)
+    );
   });
 
   const addToCart = useCallback(
@@ -509,77 +507,17 @@ export function PdvPage() {
             )}
           </div>
 
-          {/* Filtros de Categoria */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('Todos')}
-              className={`px-3.5 py-1.5 rounded-full font-label-md font-bold whitespace-nowrap transition-colors ${
-                selectedCategory === 'Todos'
-                  ? 'bg-primary-container text-white shadow-sm'
-                  : 'bg-white border border-slate-200 text-on-surface hover:bg-surface-container-low'
-              }`}
-            >
-              Todos ({products.length})
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setSelectedCategory(cat.name)}
-                className={`px-3.5 py-1.5 rounded-full font-label-md font-bold whitespace-nowrap transition-colors ${
-                  selectedCategory === cat.name
-                    ? 'bg-secondary text-white shadow-sm'
-                    : 'bg-white border border-slate-200 text-on-surface hover:bg-surface-container-low'
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
-
-          {/* Grade de Produtos Rápidos */}
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {filteredProducts.map((product) => {
-                const lowStock = product.stock <= product.minStock;
-                return (
-                  <button
-                    key={product.id}
-                    type="button"
-                    onClick={() => addToCart(product)}
-                    className="bg-surface-container-lowest p-3.5 rounded-xl border border-slate-200 hover:border-primary-container hover:shadow-md text-left transition-all active:scale-[0.98] flex flex-col justify-between min-h-[118px]"
-                  >
-                    <div className="flex items-start justify-between gap-1">
-                      <span className="font-label-sm text-secondary uppercase font-bold">
-                        {product.category}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded font-label-sm font-bold tabular-nums ${
-                          lowStock
-                            ? 'bg-error-container text-on-error-container'
-                            : 'bg-surface-container text-on-surface-variant'
-                        }`}
-                      >
-                        {product.stock} {product.unit}
-                      </span>
-                    </div>
-
-                    <p className="font-label-lg font-bold text-on-surface mt-1 line-clamp-2">
-                      {product.name}
-                    </p>
-
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-surface-container">
-                      <span className="font-headline-sm font-extrabold text-primary tabular-nums">
-                        {formatBRL(product.salePrice)}
-                      </span>
-                      <span className="w-7 h-7 rounded-lg bg-tertiary-fixed/50 text-tertiary flex items-center justify-center font-bold">
-                        +
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+          {/* Identidade da Loja no PDV */}
+          <div className="flex-1 min-h-0 flex items-center justify-center bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm p-8">
+            <div className="text-center flex flex-col items-center">
+              <div className="w-24 h-24 rounded-2xl bg-primary-container text-white flex flex-col items-center justify-center shadow-lg mb-5 ring-4 ring-tertiary-fixed/60">
+                <span className="material-symbols-outlined text-[42px] text-tertiary-fixed">
+                  storefront
+                </span>
+              </div>
+              <h2 className="font-headline-md text-2xl sm:text-3xl font-extrabold text-primary tracking-tight">
+                Mercadinho e Lanchonete do Geleia
+              </h2>
             </div>
           </div>
         </section>
