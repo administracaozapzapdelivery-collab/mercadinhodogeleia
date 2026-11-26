@@ -8,11 +8,12 @@ import {
 } from '../utils/printClient';
 import { maskCnpj, maskPhone, cnpjError, phoneError } from '../utils/masks';
 
-type SettingsTab = 'geral' | 'pdv' | 'estoque' | 'backup';
+type SettingsTab = 'geral' | 'pdv' | 'mercadopago' | 'estoque' | 'backup';
 
 const tabs: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'geral', label: 'Dados da Loja', icon: 'storefront' },
   { id: 'pdv', label: 'PDV e Impressora Térmica', icon: 'print' },
+  { id: 'mercadopago', label: 'Mercado Pago (PIX)', icon: 'qr_code_2' },
   { id: 'estoque', label: 'Regras de Estoque e Crediário', icon: 'rule' },
   { id: 'backup', label: 'Backup e Segurança', icon: 'backup' },
 ];
@@ -29,6 +30,11 @@ interface ConfigState {
   exigir_abertura_caixa: boolean;
   registrar_log_auditoria: boolean;
   meta_diaria_faturamento: number;
+  mp_pix_ativo: boolean;
+  mp_public_key: string;
+  mp_access_token?: string;
+  mp_access_token_masked?: string;
+  has_mp_access_token?: boolean;
 }
 
 interface BackupRow {
@@ -55,12 +61,17 @@ export function SettingsPage() {
     exigir_abertura_caixa: true,
     registrar_log_auditoria: true,
     meta_diaria_faturamento: 5800,
+    mp_pix_ativo: true,
+    mp_public_key: '',
+    mp_access_token: '',
   });
   const [printers, setPrinters] = useState<PrinterOption[]>([]);
   const [printersSupported, setPrintersSupported] = useState<boolean>(true);
   const [loadingPrinters, setLoadingPrinters] = useState(false);
   const [testPrintStatus, setTestPrintStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [testingPrint, setTestingPrint] = useState(false);
+  const [testingMp, setTestingMp] = useState(false);
+  const [mpTestStatus, setMpTestStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   const cnpjErr = submitted && cfg.cnpj ? cnpjError(cfg.cnpj) : '';
   const phoneErr = submitted && cfg.telefone_whatsapp ? phoneError(cfg.telefone_whatsapp) : '';
@@ -141,6 +152,36 @@ export function SettingsPage() {
     cashReceived: 1.0,
     changeDue: 0,
   };
+
+  async function handleTestMp() {
+    setTestingMp(true);
+    setMpTestStatus(null);
+    try {
+      const res = await fetch('/api/mercadopago/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: cfg.mp_access_token?.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setMpTestStatus({
+          ok: true,
+          text: `Conexão validada! Conta Mercado Pago: ${data.nickname || data.email || data.userId}`,
+        });
+      } else {
+        setMpTestStatus({
+          ok: false,
+          text: data.error || 'Não foi possível validar o Access Token.',
+        });
+      }
+    } catch (err) {
+      setMpTestStatus({ ok: false, text: (err as Error).message });
+    } finally {
+      setTestingMp(false);
+    }
+  }
 
   async function handleSave() {
     setSubmitted(true);
@@ -375,6 +416,91 @@ export function SettingsPage() {
                 bobinaWidth={cfg.largura_bobina === '58mm' ? '58mm' : '80mm'}
               />
             </div>
+          </div>
+        )}
+
+        {activeTab === 'mercadopago' && (
+          <div className="space-y-5">
+            <div className="p-4 rounded-xl bg-secondary/10 border border-secondary/30 flex items-start gap-3">
+              <span className="material-symbols-outlined text-secondary text-[24px] shrink-0">
+                qr_code_2
+              </span>
+              <div>
+                <h3 className="font-label-lg font-extrabold text-secondary">
+                  Integração Exclusiva para PIX (Somente PIX)
+                </h3>
+                <p className="font-body-sm text-on-surface-variant mt-0.5">
+                  Quando o cliente escolher <strong>PIX</strong> no PDV, o sistema gera o QR Code do
+                  Mercado Pago na tela e confirma o pagamento automaticamente. Não habilita cartão
+                  ou boleto.
+                </p>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2.5 font-label-md font-bold">
+              <input
+                type="checkbox"
+                checked={cfg.mp_pix_ativo}
+                onChange={(e) => setCfg({ ...cfg, mp_pix_ativo: e.target.checked })}
+                className="w-4 h-4 accent-primary-container"
+              />
+              Ativar geração automática de QR Code PIX no PDV
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-label-md mb-1">Public Key (Produção)</label>
+                <input
+                  value={cfg.mp_public_key ?? ''}
+                  onChange={(e) => setCfg({ ...cfg, mp_public_key: e.target.value })}
+                  placeholder="APP_USR-..."
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block font-label-md mb-1">Access Token (Produção)</label>
+                <input
+                  type="password"
+                  value={cfg.mp_access_token ?? ''}
+                  onChange={(e) => setCfg({ ...cfg, mp_access_token: e.target.value })}
+                  placeholder={
+                    cfg.has_mp_access_token
+                      ? `Salvo: ${cfg.mp_access_token_masked} (digite para alterar)`
+                      : 'APP_USR-...'
+                  }
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+              <p className="font-body-sm text-on-surface-variant">
+                {cfg.has_mp_access_token
+                  ? 'Credenciais de produção salvas no banco de dados.'
+                  : 'Informe as credenciais de produção e clique em Salvar Alterações.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleTestMp()}
+                disabled={testingMp}
+                className="px-4 py-2 rounded-lg bg-secondary hover:opacity-90 disabled:opacity-50 text-white font-label-md font-bold flex items-center gap-1.5 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">verified</span>
+                <span>{testingMp ? 'Validando...' : 'Testar Conexão Mercado Pago'}</span>
+              </button>
+            </div>
+
+            {mpTestStatus && (
+              <div
+                className={`p-3 rounded-xl border font-label-md font-bold ${
+                  mpTestStatus.ok
+                    ? 'bg-tertiary-fixed/40 border-tertiary-fixed-dim text-tertiary'
+                    : 'bg-error-container/40 border-error/30 text-error'
+                }`}
+              >
+                {mpTestStatus.text}
+              </div>
+            )}
           </div>
         )}
 

@@ -61,9 +61,33 @@ export function PdvPage() {
   const [authorizerPin, setAuthorizerPin] = useState('');
   const [pinReason, setPinReason] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
+  const [mpPixEnabled, setMpPixEnabled] = useState(false);
+  const [pixGenerating, setPixGenerating] = useState(false);
+  const [pixModalOpen, setPixModalOpen] = useState(false);
+  const [pixChecking, setPixChecking] = useState(false);
+  const [pixCopied, setPixCopied] = useState(false);
+  const [pixError, setPixError] = useState<string | null>(null);
+  const [pixData, setPixData] = useState<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    amount: number;
+  } | null>(null);
 
   const todayBr = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const openShift = shifts.find((s) => s.status === 'Aberto' && s.openedAt?.startsWith(todayBr));
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.config) {
+          setMpPixEnabled(Boolean(data.config.mp_pix_ativo && data.config.has_mp_access_token));
+        }
+      })
+      .catch(() => null);
+  }, []);
 
   async function handleConfirmPrintReceipt(targetReceipt: ReceiptData) {
     setPrintingReceipt(true);
@@ -324,6 +348,81 @@ export function PdvPage() {
     cashVal,
     changeDue,
   ]);
+
+  async function handleStartPixPayment() {
+    if (cart.length === 0 || pixGenerating || submitting) return;
+    if (!openShift) {
+      setFeedback({
+        type: 'err',
+        text: 'Nenhum caixa do dia aberto. Abra o caixa de hoje antes de realizar vendas.',
+      });
+      return;
+    }
+    setPixGenerating(true);
+    setPixError(null);
+    setPixCopied(false);
+    try {
+      const res = await fetch('/api/mercadopago/pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: total,
+          description: `Venda PDV - Mercadinho e Lanchonete do Geleia (${itemsCount} itens)`,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.paymentId) {
+        throw new Error(data?.error || 'Erro ao gerar QR Code PIX no Mercado Pago.');
+      }
+      setPixData({
+        paymentId: data.paymentId,
+        status: data.status || 'pending',
+        qrCode: data.qrCode || '',
+        qrCodeBase64: data.qrCodeBase64 || '',
+        amount: total,
+      });
+      setCheckoutOpen(false);
+      setPixModalOpen(true);
+    } catch (err) {
+      setFeedback({ type: 'err', text: (err as Error).message });
+    } finally {
+      setPixGenerating(false);
+    }
+  }
+
+  const checkPixStatus = useCallback(
+    async (paymentId: string) => {
+      setPixChecking(true);
+      try {
+        const res = await fetch(`/api/mercadopago/pix/${paymentId}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data) return;
+        setPixData((prev) => (prev ? { ...prev, status: data.status } : prev));
+        if (data.status === 'approved') {
+          setPixModalOpen(false);
+          setPixData(null);
+          await handleFinalizeSale();
+        } else if (data.status === 'cancelled' || data.status === 'rejected') {
+          setPixError(
+            `Pagamento PIX ${data.status === 'cancelled' ? 'cancelado' : 'rejeitado'} no Mercado Pago.`
+          );
+        }
+      } catch {
+        // Ignora falha pontual de polling
+      } finally {
+        setPixChecking(false);
+      }
+    },
+    [handleFinalizeSale]
+  );
+
+  useEffect(() => {
+    if (!pixModalOpen || !pixData?.paymentId || pixData.status === 'approved') return;
+    const timer = setInterval(() => {
+      void checkPixStatus(pixData.paymentId);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [pixModalOpen, pixData?.paymentId, pixData?.status, checkPixStatus]);
 
   const openCheckoutModal = useCallback(() => {
     if (cart.length === 0 || submitting) return;
@@ -841,6 +940,18 @@ export function PdvPage() {
             </div>
           )}
 
+          {paymentMethod === 'PIX' && mpPixEnabled && (
+            <div className="p-3.5 rounded-xl bg-secondary/10 border border-secondary/30 flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-secondary text-[22px] shrink-0">
+                qr_code_2
+              </span>
+              <p className="font-body-sm text-on-surface">
+                <strong>Somente PIX (Mercado Pago):</strong> ao confirmar, o QR Code será exibido na
+                tela para o cliente pagar.
+              </p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
             <button
               type="button"
@@ -851,17 +962,32 @@ export function PdvPage() {
             </button>
             <button
               type="button"
-              onClick={() => void handleFinalizeSale()}
+              onClick={() => {
+                if (paymentMethod === 'PIX' && mpPixEnabled) {
+                  void handleStartPixPayment();
+                } else {
+                  void handleFinalizeSale();
+                }
+              }}
               disabled={
                 submitting ||
+                pixGenerating ||
                 (paymentMethod === 'Crediário' && !selectedCustomer) ||
                 (paymentMethod === 'Dinheiro' && cashReceived !== '' && cashVal < total)
               }
               className="px-5 py-2.5 rounded-xl bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-50 text-[#0F172A] font-headline-sm font-extrabold shadow-sm flex items-center gap-2"
             >
-              <span className="material-symbols-outlined text-[20px]">check_circle</span>
+              <span className="material-symbols-outlined text-[20px]">
+                {paymentMethod === 'PIX' && mpPixEnabled ? 'qr_code_2' : 'check_circle'}
+              </span>
               <span>
-                {submitting ? 'Processando...' : `Confirmar Venda (${paymentMethod})`}
+                {pixGenerating
+                  ? 'Gerando QR Code...'
+                  : submitting
+                    ? 'Processando...'
+                    : paymentMethod === 'PIX' && mpPixEnabled
+                      ? 'Gerar QR Code PIX'
+                      : `Confirmar Venda (${paymentMethod})`}
               </span>
             </button>
           </div>
@@ -1239,6 +1365,118 @@ export function PdvPage() {
             </form>
           )}
         </div>
+      </Modal>
+
+      {/* Modal de Pagamento PIX (Mercado Pago — Somente PIX) */}
+      <Modal
+        open={pixModalOpen && Boolean(pixData)}
+        title="Pagamento via PIX — Mercado Pago"
+        onClose={() => {
+          setPixModalOpen(false);
+          setPixData(null);
+          setPixError(null);
+        }}
+      >
+        {pixData && (
+          <div className="space-y-4 text-center">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/10 text-secondary font-label-sm font-extrabold uppercase">
+              <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+              <span>Somente PIX • Mercado Pago</span>
+            </div>
+
+            <div>
+              <p className="font-label-sm text-on-surface-variant">Valor a Pagar</p>
+              <p className="font-headline-lg text-3xl font-extrabold text-primary tabular-nums">
+                {formatBRL(pixData.amount)}
+              </p>
+            </div>
+
+            {pixData.qrCodeBase64 && (
+              <div className="flex justify-center">
+                <img
+                  src={`data:image/png;base64,${pixData.qrCodeBase64}`}
+                  alt="QR Code PIX Mercado Pago"
+                  className="w-60 h-60 rounded-xl border-2 border-slate-200 p-2 bg-white shadow-sm"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-2 text-secondary font-label-md font-bold">
+              <span className="material-symbols-outlined text-[18px] animate-spin">sync</span>
+              <span>
+                {pixChecking
+                  ? 'Verificando pagamento...'
+                  : 'Aguardando pagamento do cliente (atualiza a cada 3s)...'}
+              </span>
+            </div>
+
+            {pixData.qrCode && (
+              <div className="text-left bg-surface-container-low p-3 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-label-sm font-bold text-on-surface-variant uppercase">
+                    PIX Copia e Cola
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(pixData.qrCode);
+                      setPixCopied(true);
+                      setTimeout(() => setPixCopied(false), 2000);
+                    }}
+                    className="text-xs font-bold text-primary-container hover:underline"
+                  >
+                    {pixCopied ? 'Copiado!' : 'Copiar código'}
+                  </button>
+                </div>
+                <p className="font-mono text-[11px] break-all text-on-surface line-clamp-2">
+                  {pixData.qrCode}
+                </p>
+              </div>
+            )}
+
+            {pixError && (
+              <div className="p-3 rounded-lg bg-error-container/40 border border-error/30 text-error font-label-md font-bold">
+                {pixError}
+              </div>
+            )}
+
+            <div className="flex flex-wrap justify-between gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => {
+                  setPixModalOpen(false);
+                  setPixData(null);
+                  setPixError(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-200 font-label-md font-bold hover:bg-surface-container-low"
+              >
+                Cancelar PIX
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={pixChecking}
+                  onClick={() => void checkPixStatus(pixData.paymentId)}
+                  className="px-4 py-2 rounded-lg bg-secondary text-white font-label-md font-bold disabled:opacity-50"
+                >
+                  Verificar Agora
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setPixModalOpen(false);
+                    setPixData(null);
+                    void handleFinalizeSale();
+                  }}
+                  className="px-4 py-2 rounded-lg bg-[#3DDB8F] text-[#0F172A] font-label-md font-extrabold"
+                >
+                  Confirmar Recebimento
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal

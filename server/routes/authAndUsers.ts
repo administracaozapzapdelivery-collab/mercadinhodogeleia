@@ -319,7 +319,16 @@ authAndUsersRouter.get('/settings', requireAuth, async (_req, res) => {
       pool.query('SELECT * FROM configuracoes WHERE id = 1'),
       pool.query('SELECT id, nome_arquivo, tamanho_bytes, tipo, caminho_storage, created_at FROM backups_historico ORDER BY id DESC LIMIT 20'),
     ]);
-    res.json({ config: cfg.rows[0] ?? null, backups: backups.rows });
+    const row = cfg.rows[0] ?? null;
+    if (row) {
+      const rawToken = typeof row.mp_access_token === 'string' ? row.mp_access_token : '';
+      row.has_mp_access_token = Boolean(rawToken);
+      row.mp_access_token_masked = rawToken
+        ? `${rawToken.slice(0, 12)}••••••••${rawToken.slice(-8)}`
+        : '';
+      delete row.mp_access_token;
+    }
+    res.json({ config: row, backups: backups.rows });
   } catch (err) {
     res.status(500).json({ error: safeErrorMessage(err) });
   }
@@ -328,6 +337,10 @@ authAndUsersRouter.get('/settings', requireAuth, async (_req, res) => {
 authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const c = req.body;
+    const newAccessToken =
+      typeof c.mp_access_token === 'string' && c.mp_access_token.trim()
+        ? c.mp_access_token.trim()
+        : null;
     await pool.query(
       `UPDATE configuracoes SET
         nome_fantasia = COALESCE($1, nome_fantasia),
@@ -342,6 +355,9 @@ authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE')
         recalcular_custo_medio = COALESCE($10, recalcular_custo_medio),
         meta_diaria_faturamento = COALESCE($11, meta_diaria_faturamento),
         nome_impressora = COALESCE($12, nome_impressora),
+        mp_pix_ativo = COALESCE($13, mp_pix_ativo),
+        mp_public_key = COALESCE($14, mp_public_key),
+        mp_access_token = COALESCE($15, mp_access_token),
         updated_at = NOW()
        WHERE id = 1`,
       [
@@ -357,6 +373,9 @@ authAndUsersRouter.put('/settings', requireAuth, requireRole('ADMIN', 'GERENTE')
         c.recalcular_custo_medio ?? null,
         c.meta_diaria_faturamento != null ? Number(c.meta_diaria_faturamento) : null,
         c.nome_impressora ?? null,
+        typeof c.mp_pix_ativo === 'boolean' ? c.mp_pix_ativo : null,
+        c.mp_public_key ?? null,
+        newAccessToken,
       ]
     );
     res.json({ ok: true });

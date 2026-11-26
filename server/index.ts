@@ -8,6 +8,7 @@ import { salesAndPdvRouter } from './routes/salesAndPdv.ts';
 import { partnersAndFinanceRouter } from './routes/partnersAndFinance.ts';
 import { notificationsRouter } from './routes/notifications.ts';
 import { printRouter } from './routes/print.ts';
+import { mercadopagoRouter } from './routes/mercadopago.ts';
 import { requireAuth, safeErrorMessage, securityHeaders } from './utils/security.ts';
 
 export const app = express();
@@ -263,6 +264,7 @@ app.use('/api', salesAndPdvRouter);
 app.use('/api', partnersAndFinanceRouter);
 app.use('/api', notificationsRouter);
 app.use('/api/print', printRouter);
+app.use('/api/mercadopago', mercadopagoRouter);
 
 const port = Number(process.env.PORT ?? 3001);
 

@@ -52,6 +52,26 @@ async function initDatabase() {
      WHERE id = 1 AND (nome_impressora IS NULL OR nome_impressora = '' OR nome_impressora = 'EPSON TM-T20X \u2014 Balc\xE3o 01')`
   );
   await pool.query(
+    "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mp_pix_ativo BOOLEAN NOT NULL DEFAULT TRUE"
+  );
+  await pool.query(
+    "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mp_public_key TEXT"
+  );
+  await pool.query(
+    "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mp_access_token TEXT"
+  );
+  await pool.query(
+    `UPDATE configuracoes
+     SET mp_pix_ativo = TRUE,
+         mp_public_key = COALESCE(NULLIF(mp_public_key, ''), $1),
+         mp_access_token = COALESCE(NULLIF(mp_access_token, ''), $2)
+     WHERE id = 1 AND (mp_access_token IS NULL OR mp_access_token = '')`,
+    [
+      "APP_USR-0ac51a93-601e-4b68-b47e-2c2210e5296e",
+      "APP_USR-6816043027376004-112609-9b2762d1ed0bb638bb63b6778a056be7-3879037648"
+    ]
+  );
+  await pool.query(
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0"
   );
   await pool.query(
@@ -649,7 +669,14 @@ authAndUsersRouter.get("/settings", requireAuth, async (_req, res) => {
       pool.query("SELECT * FROM configuracoes WHERE id = 1"),
       pool.query("SELECT id, nome_arquivo, tamanho_bytes, tipo, caminho_storage, created_at FROM backups_historico ORDER BY id DESC LIMIT 20")
     ]);
-    res.json({ config: cfg.rows[0] ?? null, backups: backups.rows });
+    const row = cfg.rows[0] ?? null;
+    if (row) {
+      const rawToken = typeof row.mp_access_token === "string" ? row.mp_access_token : "";
+      row.has_mp_access_token = Boolean(rawToken);
+      row.mp_access_token_masked = rawToken ? `${rawToken.slice(0, 12)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${rawToken.slice(-8)}` : "";
+      delete row.mp_access_token;
+    }
+    res.json({ config: row, backups: backups.rows });
   } catch (err) {
     res.status(500).json({ error: safeErrorMessage(err) });
   }
@@ -657,6 +684,7 @@ authAndUsersRouter.get("/settings", requireAuth, async (_req, res) => {
 authAndUsersRouter.put("/settings", requireAuth, requireRole("ADMIN", "GERENTE"), async (req, res) => {
   try {
     const c = req.body;
+    const newAccessToken = typeof c.mp_access_token === "string" && c.mp_access_token.trim() ? c.mp_access_token.trim() : null;
     await pool.query(
       `UPDATE configuracoes SET
         nome_fantasia = COALESCE($1, nome_fantasia),
@@ -671,6 +699,9 @@ authAndUsersRouter.put("/settings", requireAuth, requireRole("ADMIN", "GERENTE")
         recalcular_custo_medio = COALESCE($10, recalcular_custo_medio),
         meta_diaria_faturamento = COALESCE($11, meta_diaria_faturamento),
         nome_impressora = COALESCE($12, nome_impressora),
+        mp_pix_ativo = COALESCE($13, mp_pix_ativo),
+        mp_public_key = COALESCE($14, mp_public_key),
+        mp_access_token = COALESCE($15, mp_access_token),
         updated_at = NOW()
        WHERE id = 1`,
       [
@@ -685,7 +716,10 @@ authAndUsersRouter.put("/settings", requireAuth, requireRole("ADMIN", "GERENTE")
         c.registrar_log_auditoria ?? null,
         c.recalcular_custo_medio ?? null,
         c.meta_diaria_faturamento != null ? Number(c.meta_diaria_faturamento) : null,
-        c.nome_impressora ?? null
+        c.nome_impressora ?? null,
+        typeof c.mp_pix_ativo === "boolean" ? c.mp_pix_ativo : null,
+        c.mp_public_key ?? null,
+        newAccessToken
       ]
     );
     res.json({ ok: true });
@@ -2515,6 +2549,144 @@ printRouter.post("/test", requireAuth, async (req, res) => {
   }
 });
 
+// server/routes/mercadopago.ts
+import crypto2 from "node:crypto";
+import { Router as Router7 } from "express";
+var mercadopagoRouter = Router7();
+var MP_API_BASE = "https://api.mercadopago.com";
+async function getMpConfig() {
+  const { rows } = await pool.query("SELECT mp_pix_ativo, mp_public_key, mp_access_token FROM configuracoes WHERE id = 1");
+  const row = rows[0];
+  return {
+    active: Boolean(row?.mp_pix_ativo),
+    publicKey: row?.mp_public_key || process.env.MP_PUBLIC_KEY || "",
+    accessToken: row?.mp_access_token || process.env.MP_ACCESS_TOKEN || ""
+  };
+}
+mercadopagoRouter.post("/pix", requireAuth, async (req, res) => {
+  try {
+    const { amount, description, payerEmail } = req.body;
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      res.status(400).json({ error: "Valor inv\xE1lido para gerar QR Code PIX." });
+      return;
+    }
+    const mp = await getMpConfig();
+    if (!mp.active) {
+      res.status(400).json({ error: "Integra\xE7\xE3o Mercado Pago (PIX) est\xE1 desativada nas Configura\xE7\xF5es." });
+      return;
+    }
+    if (!mp.accessToken) {
+      res.status(400).json({ error: "Access Token do Mercado Pago n\xE3o configurado." });
+      return;
+    }
+    const expiration = new Date(Date.now() + 15 * 60 * 1e3).toISOString();
+    const idempotencyKey = crypto2.randomUUID();
+    const mpRes = await fetch(`${MP_API_BASE}/v1/payments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${mp.accessToken}`,
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify({
+        transaction_amount: Number(numericAmount.toFixed(2)),
+        description: (description || "Venda PDV - Mercadinho e Lanchonete do Geleia").slice(0, 250),
+        payment_method_id: "pix",
+        date_of_expiration: expiration,
+        payer: {
+          email: payerEmail || "cliente@mercadinhodogeleia.com.br"
+        }
+      })
+    });
+    const data = await mpRes.json().catch(() => null);
+    if (!mpRes.ok || !data) {
+      const msg = data?.message || data?.cause?.[0]?.description || "Erro ao gerar cobran\xE7a PIX no Mercado Pago.";
+      res.status(mpRes.status || 502).json({ error: msg });
+      return;
+    }
+    const txData = data.point_of_interaction?.transaction_data ?? {};
+    res.json({
+      paymentId: String(data.id),
+      status: String(data.status || "pending"),
+      qrCode: txData.qr_code || "",
+      qrCodeBase64: txData.qr_code_base64 || "",
+      ticketUrl: txData.ticket_url || "",
+      expiresAt: data.date_of_expiration || expiration
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+mercadopagoRouter.get("/pix/:paymentId", requireAuth, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    if (!/^\d+$/.test(paymentId)) {
+      res.status(400).json({ error: "ID de pagamento inv\xE1lido." });
+      return;
+    }
+    const mp = await getMpConfig();
+    if (!mp.accessToken) {
+      res.status(400).json({ error: "Access Token do Mercado Pago n\xE3o configurado." });
+      return;
+    }
+    const mpRes = await fetch(`${MP_API_BASE}/v1/payments/${paymentId}`, {
+      headers: {
+        Authorization: `Bearer ${mp.accessToken}`
+      }
+    });
+    const data = await mpRes.json().catch(() => null);
+    if (!mpRes.ok || !data) {
+      res.status(mpRes.status || 502).json({
+        error: data?.message || "Erro ao consultar status do PIX no Mercado Pago."
+      });
+      return;
+    }
+    res.json({
+      paymentId: String(data.id),
+      status: String(data.status || "pending"),
+      statusDetail: String(data.status_detail || ""),
+      transactionAmount: Number(data.transaction_amount || 0),
+      dateApproved: data.date_approved || null
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+mercadopagoRouter.post("/test", requireAuth, requireRole("ADMIN", "GERENTE"), async (req, res) => {
+  try {
+    const bodyToken = typeof req.body?.accessToken === "string" ? req.body.accessToken.trim() : "";
+    const mp = await getMpConfig();
+    const tokenToTest = bodyToken || mp.accessToken;
+    if (!tokenToTest) {
+      res.status(400).json({ ok: false, error: "Informe o Access Token de produ\xE7\xE3o." });
+      return;
+    }
+    const mpRes = await fetch(`${MP_API_BASE}/users/me`, {
+      headers: {
+        Authorization: `Bearer ${tokenToTest}`
+      }
+    });
+    const data = await mpRes.json().catch(() => null);
+    if (!mpRes.ok || !data) {
+      res.status(400).json({
+        ok: false,
+        error: data?.message || "Access Token inv\xE1lido ou sem permiss\xE3o."
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      userId: data.id,
+      nickname: data.nickname || "",
+      email: data.email || "",
+      siteId: data.site_id || "MLB"
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // server/index.ts
 var app = express();
 app.disable("x-powered-by");
@@ -2757,6 +2929,7 @@ app.use("/api", salesAndPdvRouter);
 app.use("/api", partnersAndFinanceRouter);
 app.use("/api", notificationsRouter);
 app.use("/api/print", printRouter);
+app.use("/api/mercadopago", mercadopagoRouter);
 var port = Number(process.env.PORT ?? 3001);
 var dbInitPromise = null;
 function ensureDbInitialized() {
