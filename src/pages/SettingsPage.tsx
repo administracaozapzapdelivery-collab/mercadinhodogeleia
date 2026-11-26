@@ -482,7 +482,13 @@ export function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const url = `${window.location.origin}/api/mercadopago/webhook`;
+                    const isLocal =
+                      window.location.hostname === 'localhost' ||
+                      window.location.hostname === '127.0.0.1';
+                    const base = isLocal
+                      ? 'https://mercadinhodogeleia.vercel.app'
+                      : window.location.origin;
+                    const url = `${base}/api/mercadopago/webhook`;
                     void navigator.clipboard?.writeText(url);
                     setWebhookCopied(true);
                     setTimeout(() => setWebhookCopied(false), 2000);
@@ -494,7 +500,13 @@ export function SettingsPage() {
               </div>
               <input
                 readOnly
-                value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/mercadopago/webhook`}
+                value={`${
+                  typeof window !== 'undefined' &&
+                  window.location.hostname !== 'localhost' &&
+                  window.location.hostname !== '127.0.0.1'
+                    ? window.location.origin
+                    : 'https://mercadinhodogeleia.vercel.app'
+                }/api/mercadopago/webhook`}
                 className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white font-mono text-xs text-on-surface"
               />
               <p className="font-body-sm text-on-surface-variant">
