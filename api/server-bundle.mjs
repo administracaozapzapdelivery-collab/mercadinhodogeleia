@@ -71,6 +71,13 @@ async function initDatabase() {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
+    SELECT 'Venda no Balc\xE3o', '', 0.00, 0.00, 'EM_DIA'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM clientes WHERE LOWER(nome) = 'venda no balc\xE3o'
+    )
+  `);
   await pool.query(
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0"
   );
@@ -1148,9 +1155,23 @@ salesAndPdvRouter.post("/sales", requireAuth, async (req, res, next) => {
       }
     }
     const total = Math.max(0, subtotal - parsedDiscount);
-    const parsedCustomerId = customerId ? Number(customerId) : null;
+    let parsedCustomerId = customerId ? Number(customerId) : null;
     let authorizedByUser = null;
     let authorizationReason = null;
+    if (!parsedCustomerId && formaDb !== "FIADO") {
+      const balcaoRes = await client.query(
+        `SELECT id FROM clientes WHERE LOWER(nome) = 'venda no balc\xE3o' LIMIT 1`
+      );
+      if (balcaoRes.rows[0]?.id) {
+        parsedCustomerId = balcaoRes.rows[0].id;
+      } else {
+        const insertedBalcao = await client.query(
+          `INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
+           VALUES ('Venda no Balc\xE3o', '', 0.00, 0.00, 'EM_DIA') RETURNING id`
+        );
+        parsedCustomerId = insertedBalcao.rows[0].id;
+      }
+    }
     if (formaDb === "FIADO") {
       if (!parsedCustomerId) {
         await client.query("ROLLBACK");

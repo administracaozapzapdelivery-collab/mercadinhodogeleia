@@ -59,6 +59,13 @@ export async function initDatabase() {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
+    SELECT 'Venda no Balcão', '', 0.00, 0.00, 'EM_DIA'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM clientes WHERE LOWER(nome) = 'venda no balcão'
+    )
+  `);
   await pool.query(
     'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0'
   );

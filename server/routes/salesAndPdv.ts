@@ -172,9 +172,24 @@ salesAndPdvRouter.post('/sales', requireAuth, async (req, res, next) => {
     const total = Math.max(0, subtotal - parsedDiscount);
 
     // Validar limite de crediário e autorização por PIN se pagamento for FIADO
-    const parsedCustomerId = customerId ? Number(customerId) : null;
+    let parsedCustomerId = customerId ? Number(customerId) : null;
     let authorizedByUser: { id: number; nome: string } | null = null;
     let authorizationReason: string | null = null;
+
+    if (!parsedCustomerId && formaDb !== 'FIADO') {
+      const balcaoRes = await client.query<{ id: number }>(
+        `SELECT id FROM clientes WHERE LOWER(nome) = 'venda no balcão' LIMIT 1`
+      );
+      if (balcaoRes.rows[0]?.id) {
+        parsedCustomerId = balcaoRes.rows[0].id;
+      } else {
+        const insertedBalcao = await client.query<{ id: number }>(
+          `INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
+           VALUES ('Venda no Balcão', '', 0.00, 0.00, 'EM_DIA') RETURNING id`
+        );
+        parsedCustomerId = insertedBalcao.rows[0].id;
+      }
+    }
 
     if (formaDb === 'FIADO') {
       if (!parsedCustomerId) {
