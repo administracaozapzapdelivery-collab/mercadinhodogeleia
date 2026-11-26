@@ -172,8 +172,13 @@ async function initDatabase() {
       (NULL, 'Aluguel do Ponto Comercial', 'ALUGUEL', 3200.00, '2026-11-15', 'PAGO');
     `);
   }
-  const itemsCount = await pool.query("SELECT COUNT(*) AS count FROM venda_itens");
-  if (Number(itemsCount.rows[0]?.count ?? 0) === 0) {
+  const itemsCount = await pool.query(
+    `SELECT COUNT(*) AS count FROM venda_itens`
+  );
+  const demoVendas = await pool.query(
+    `SELECT COUNT(*) AS count FROM vendas WHERE id IN (1, 2, 3, 4, 5)`
+  );
+  if (Number(itemsCount.rows[0]?.count ?? 0) === 0 && Number(demoVendas.rows[0]?.count ?? 0) === 5) {
     await pool.query(`
       INSERT INTO venda_itens (venda_id, produto_id, quantidade, preco_unitario, custo_unitario, subtotal) VALUES
       (1, 1, 4, 10.50, 6.80, 42.00),

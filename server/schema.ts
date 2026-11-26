@@ -176,9 +176,14 @@ export async function initDatabase() {
     `);
   }
 
-  // Popula venda_itens iniciais se estiver vazio (para Curva ABC e modal "Ver" de vendas)
-  const itemsCount = await pool.query<{ count: string }>('SELECT COUNT(*) AS count FROM venda_itens');
-  if (Number(itemsCount.rows[0]?.count ?? 0) === 0) {
+  // Popula venda_itens iniciais apenas se as vendas demo (id 1..5) existirem e venda_itens estiver vazio
+  const itemsCount = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM venda_itens`
+  );
+  const demoVendas = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM vendas WHERE id IN (1, 2, 3, 4, 5)`
+  );
+  if (Number(itemsCount.rows[0]?.count ?? 0) === 0 && Number(demoVendas.rows[0]?.count ?? 0) === 5) {
     await pool.query(`
       INSERT INTO venda_itens (venda_id, produto_id, quantidade, preco_unitario, custo_unitario, subtotal) VALUES
       (1, 1, 4, 10.50, 6.80, 42.00),
