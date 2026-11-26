@@ -5,6 +5,11 @@ import { parsePositiveId, requireAuth, requireRole, safeErrorMessage } from '../
 
 export const partnersAndFinanceRouter = Router();
 
+function isBalcaoCustomerName(name?: string | null): boolean {
+  const normalized = (name ?? '').trim().toLowerCase();
+  return normalized === 'venda no balcão' || normalized === 'vendas no balcão';
+}
+
 // Clientes CRUD + Fiado
 partnersAndFinanceRouter.post('/customers', requireAuth, async (req, res) => {
   try {
@@ -39,9 +44,15 @@ partnersAndFinanceRouter.put('/customers/:id', requireAuth, async (req, res) => 
       res.status(400).json({ error: 'ID inválido.' });
       return;
     }
+    const existing = await pool.query<{ nome: string }>(
+      'SELECT nome FROM clientes WHERE id = $1',
+      [id]
+    );
+    const isBalcao = isBalcaoCustomerName(existing.rows[0]?.nome);
     const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
-    const statusDb =
-      status === 'Bloqueado'
+    const statusDb = isBalcao
+      ? 'EM_DIA'
+      : status === 'Bloqueado'
         ? 'BLOQUEADO'
         : status === 'Atenção'
           ? 'PROXIMO_VENCIMENTO'
@@ -58,17 +69,19 @@ partnersAndFinanceRouter.put('/customers/:id', requireAuth, async (req, res) => 
         dia_vencimento_preferencial = COALESCE($6, dia_vencimento_preferencial),
         status_credito = COALESCE($7, status_credito),
         observacoes = COALESCE($8, observacoes),
+        saldo_devedor = CASE WHEN $9 THEN 0 ELSE saldo_devedor END,
         updated_at = NOW()
-       WHERE id = $9`,
+       WHERE id = $10`,
       [
-        name ?? null,
+        isBalcao ? null : (name ?? null),
         cpf || null,
         phone ?? null,
         address ?? null,
-        creditLimit ?? null,
+        isBalcao ? 0 : (creditLimit ?? null),
         dueDay ?? null,
         statusDb,
         notes ?? null,
+        isBalcao,
         id,
       ]
     );
@@ -136,6 +149,15 @@ partnersAndFinanceRouter.post('/customers/:id/fiado/pay', requireAuth, async (re
     const val = Number(amount);
     if (!Number.isFinite(val) || val <= 0) {
       res.status(400).json({ error: 'Valor de pagamento inválido.' });
+      return;
+    }
+
+    const existing = await pool.query<{ nome: string }>(
+      'SELECT nome FROM clientes WHERE id = $1',
+      [id]
+    );
+    if (isBalcaoCustomerName(existing.rows[0]?.nome)) {
+      res.status(403).json({ error: 'O cliente padrão "Venda no Balcão" não possui crediário.' });
       return;
     }
 

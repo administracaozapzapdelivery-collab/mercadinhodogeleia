@@ -9,6 +9,8 @@ import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActi
 type ProductQuickFilter = 'all' | 'expired' | 'expiring' | 'low_stock' | 'out_of_stock';
 type ProductSort = 'name' | 'stock_asc' | 'margin_desc' | 'expiry_asc';
 
+const PAGE_SIZE = 20;
+
 function toLocalISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -38,6 +40,7 @@ export function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [sortBy, setSortBy] = useState<ProductSort>('name');
   const [quickFilter, setQuickFilter] = useState<ProductQuickFilter>('all');
+  const [currentPage, setCurrentPage] = useState(1);
   const [alertDays, setAlertDays] = useState(15);
   const [viewItem, setViewItem] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
@@ -151,6 +154,18 @@ export function ProductsPage() {
   const toggleFilter = (target: Exclude<ProductQuickFilter, 'all'>) => {
     setQuickFilter((prev) => (prev === target ? 'all' : target));
   };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, categoryFilter, sortBy, quickFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const paginated = useMemo(
+    () => filtered.slice(startIndex, startIndex + PAGE_SIZE),
+    [filtered, startIndex]
+  );
 
   return (
     <div className="flex flex-col gap-space-lg">
@@ -440,7 +455,7 @@ export function ProductsPage() {
                 </td>
               </tr>
             ) : (
-              filtered.map((p) => {
+              paginated.map((p) => {
                 const isExpired = Boolean(p.expiryDate && p.expiryDate < stats.todayStr);
                 const isExpiringSoon = Boolean(
                   p.expiryDate && p.expiryDate >= stats.todayStr && p.expiryDate <= stats.limitStr
@@ -517,6 +532,79 @@ export function ProductsPage() {
             )}
           </tbody>
         </table>
+
+        {filtered.length > 0 && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-space-lg py-3 border-t border-surface-container bg-surface-container-low/40">
+            <span className="font-body-sm text-on-surface-variant tabular-nums">
+              Mostrando{' '}
+              <strong className="text-on-surface">
+                {startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, filtered.length)}
+              </strong>{' '}
+              de <strong className="text-on-surface">{filtered.length}</strong>{' '}
+              {filtered.length === 1 ? 'produto' : 'produtos'}
+            </span>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safePage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-label-md font-bold text-on-surface hover:bg-surface-container-low disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  Anterior
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(
+                    (page) =>
+                      page === 1 ||
+                      page === totalPages ||
+                      Math.abs(page - safePage) <= 1
+                  )
+                  .reduce<(number | 'ellipsis')[]>((acc, page, idx, arr) => {
+                    if (idx > 0 && page - arr[idx - 1] > 1) {
+                      acc.push('ellipsis');
+                    }
+                    acc.push(page);
+                    return acc;
+                  }, [])
+                  .map((item, idx) =>
+                    item === 'ellipsis' ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="px-2 text-on-surface-variant font-label-md"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setCurrentPage(item)}
+                        className={`min-w-[34px] h-8 px-2 rounded-lg font-label-md font-bold tabular-nums transition-colors ${
+                          item === safePage
+                            ? 'bg-primary text-white'
+                            : 'border border-slate-200 bg-white text-on-surface hover:bg-surface-container-low'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
+
+                <button
+                  type="button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-label-md font-bold text-on-surface hover:bg-surface-container-low disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  Próxima
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Modal

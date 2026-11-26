@@ -1197,6 +1197,10 @@ export function PdvPage() {
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {(() => {
                   const filtered = customers.filter((c) => {
+                    const nomeNorm = c.name.trim().toLowerCase();
+                    if (nomeNorm === 'venda no balcão' || nomeNorm === 'vendas no balcão') {
+                      return false;
+                    }
                     const q = cliSearch.trim().toLowerCase();
                     return (
                       !q ||

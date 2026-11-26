@@ -197,14 +197,25 @@ salesAndPdvRouter.post('/sales', requireAuth, async (req, res, next) => {
         res.status(400).json({ error: 'Selecione um cliente cadastrado para venda no Crediário.' });
         return;
       }
-      const cliRes = await client.query<{ limite_credito: string; saldo_devedor: string; status_credito: string }>(
-        'SELECT limite_credito, saldo_devedor, status_credito FROM clientes WHERE id = $1',
+      const cliRes = await client.query<{
+        nome: string;
+        limite_credito: string;
+        saldo_devedor: string;
+        status_credito: string;
+      }>(
+        'SELECT nome, limite_credito, saldo_devedor, status_credito FROM clientes WHERE id = $1',
         [parsedCustomerId]
       );
       const cli = cliRes.rows[0];
       if (!cli) {
         await client.query('ROLLBACK');
         res.status(404).json({ error: 'Cliente de Crediário não encontrado.' });
+        return;
+      }
+      const cliNomeNorm = cli.nome.trim().toLowerCase();
+      if (cliNomeNorm === 'venda no balcão' || cliNomeNorm === 'vendas no balcão') {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: 'O cliente "Venda no Balcão" não pode ser utilizado em vendas no Crediário.' });
         return;
       }
 

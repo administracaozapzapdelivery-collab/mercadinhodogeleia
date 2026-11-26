@@ -52,6 +52,7 @@ export function CustomersPage() {
     let bloqueadoCount = 0;
 
     for (const c of customers) {
+      if (isProtectedBalcaoCustomer(c.name)) continue;
       totalDebt += c.currentDebt;
       totalLimit += c.creditLimit;
       if (c.currentDebt > 0) withDebtCount++;
@@ -391,31 +392,49 @@ export function CustomersPage() {
                       </div>
                       <p className="font-body-sm text-on-surface-variant">{c.cpf}</p>
                     </td>
-                    <td className="px-space-lg py-3">{c.phone}</td>
-                    <td className="px-space-lg py-3 text-right tabular-nums">{formatBRL(c.creditLimit)}</td>
+                    <td className="px-space-lg py-3">{c.phone || '—'}</td>
+                    <td className="px-space-lg py-3 text-right tabular-nums">
+                      {isProtected ? (
+                        <span className="text-on-surface-variant">—</span>
+                      ) : (
+                        formatBRL(c.creditLimit)
+                      )}
+                    </td>
                     <td className="px-space-lg py-3 text-right font-label-lg font-bold text-primary tabular-nums">
-                      {formatBRL(c.currentDebt)}
+                      {isProtected ? (
+                        <span className="text-on-surface-variant font-normal">—</span>
+                      ) : (
+                        formatBRL(c.currentDebt)
+                      )}
                     </td>
                     <td className="px-space-lg py-3">
-                      <StatusBadge
-                        label={c.status}
-                        tone={
-                          c.status === 'Em dia'
-                            ? 'success'
-                            : c.status === 'Atenção'
-                            ? 'warning'
-                            : 'danger'
-                        }
-                      />
+                      {isProtected ? (
+                        <StatusBadge label="Sem Crediário" tone="neutral" />
+                      ) : (
+                        <StatusBadge
+                          label={c.status}
+                          tone={
+                            c.status === 'Em dia'
+                              ? 'success'
+                              : c.status === 'Atenção'
+                              ? 'warning'
+                              : 'danger'
+                          }
+                        />
+                      )}
                     </td>
                     <td className="px-space-lg py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => void openFiado(c)}
-                        className="px-3 py-1.5 rounded-lg bg-primary-fixed text-primary-container font-label-sm font-bold hover:bg-primary-fixed-dim"
-                      >
-                        Receber / Extrato
-                      </button>
+                      {isProtected ? (
+                        <span className="font-body-sm text-on-surface-variant">Não se aplica</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void openFiado(c)}
+                          className="px-3 py-1.5 rounded-lg bg-primary-fixed text-primary-container font-label-sm font-bold hover:bg-primary-fixed-dim"
+                        >
+                          Receber / Extrato
+                        </button>
+                      )}
                     </td>
                     <td className="px-space-lg py-3 text-right">
                       <CrudActionButtons
@@ -461,15 +480,25 @@ export function CustomersPage() {
               </div>
               <div>
                 <p className="font-label-sm text-on-surface-variant">Situação</p>
-                <p className="font-bold text-on-surface">{viewItem.status}</p>
+                <p className="font-bold text-on-surface">
+                  {isProtectedBalcaoCustomer(viewItem.name) ? 'Sem Crediário' : viewItem.status}
+                </p>
               </div>
               <div>
                 <p className="font-label-sm text-on-surface-variant">Limite de Crédito</p>
-                <p className="font-bold text-primary">{formatBRL(viewItem.creditLimit)}</p>
+                <p className="font-bold text-primary">
+                  {isProtectedBalcaoCustomer(viewItem.name)
+                    ? 'Não se aplica'
+                    : formatBRL(viewItem.creditLimit)}
+                </p>
               </div>
               <div>
                 <p className="font-label-sm text-on-surface-variant">Saldo Devedor</p>
-                <p className="font-bold text-error">{formatBRL(viewItem.currentDebt)}</p>
+                <p className="font-bold text-error">
+                  {isProtectedBalcaoCustomer(viewItem.name)
+                    ? 'Não se aplica'
+                    : formatBRL(viewItem.currentDebt)}
+                </p>
               </div>
             </div>
           </div>

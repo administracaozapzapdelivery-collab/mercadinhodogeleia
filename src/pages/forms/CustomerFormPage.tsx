@@ -33,19 +33,20 @@ export function CustomerFormPage() {
   }, [id, customers]);
 
   const limitNum = Number(creditLimit) || 0;
+  const isBalcao = isEdit && ['venda no balcão', 'vendas no balcão'].includes(name.trim().toLowerCase());
   const cpfErr = submitted ? cpfError(cpf) : '';
-  const phoneErr = submitted ? phoneError(phone, true) : '';
+  const phoneErr = submitted ? phoneError(phone, !isBalcao) : '';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
-    if (cpfError(cpf) || phoneError(phone, true)) return;
+    if (cpfError(cpf) || phoneError(phone, !isBalcao)) return;
     const payload = {
       name: name.trim(),
       cpf: cpf.trim() || '000.000.000-00',
       phone: phone.trim(),
-      creditLimit: limitNum,
-      status: (fiadoEnabled ? 'Em dia' : 'Bloqueado') as 'Em dia' | 'Bloqueado',
+      creditLimit: isBalcao ? 0 : limitNum,
+      status: (isBalcao || fiadoEnabled ? 'Em dia' : 'Bloqueado') as 'Em dia' | 'Bloqueado',
     };
     if (isEdit && id) {
       await updateCustomer(id, payload);
@@ -69,12 +70,14 @@ export function CustomerFormPage() {
         title={isEdit ? 'Editar Cliente' : 'Cadastrar Novo Cliente'}
         subtitle="Adicione os dados de contato e defina o limite de crédito para compras no crediário no Mercadinho do Geleia."
         rightSlot={
-          <StatusToggleCard
-            title="Crediário Liberado no PDV"
-            subtitle="Ativo para vendas no caixa"
-            checked={fiadoEnabled}
-            onChange={setFiadoEnabled}
-          />
+          !isBalcao ? (
+            <StatusToggleCard
+              title="Crediário Liberado no PDV"
+              subtitle="Ativo para vendas no caixa"
+              checked={fiadoEnabled}
+              onChange={setFiadoEnabled}
+            />
+          ) : undefined
         }
       />
 
@@ -148,68 +151,72 @@ export function CustomerFormPage() {
 
         {/* Configuração de Crédito (Fiado) */}
         <section className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm p-space-xl space-y-space-md">
-          <div className="pb-3 border-b border-surface-container">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary-container text-[20px]">
-                account_balance_wallet
-              </span>
-              <h2 className="font-headline-sm font-bold text-primary">Configuração de Crédito (Crediário)</h2>
-            </div>
-            <p className="font-body-sm text-on-surface-variant mt-0.5">
-              Defina o teto máximo de compras a prazo e condições de quitação no balcão do Mercadinho do Geleia.
-            </p>
-          </div>
+          {!isBalcao && (
+            <>
+              <div className="pb-3 border-b border-surface-container">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary-container text-[20px]">
+                    account_balance_wallet
+                  </span>
+                  <h2 className="font-headline-sm font-bold text-primary">Configuração de Crédito (Crediário)</h2>
+                </div>
+                <p className="font-body-sm text-on-surface-variant mt-0.5">
+                  Defina o teto máximo de compras a prazo e condições de quitação no balcão do Mercadinho do Geleia.
+                </p>
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
-            <div>
-              <label htmlFor="cli-limit" className="block font-label-md mb-1">
-                Limite de Crédito (R$) <span className="text-error">*</span>
-              </label>
-              <input
-                id="cli-limit"
-                type="number"
-                step="10"
-                required
-                value={creditLimit}
-                onChange={(e) => setCreditLimit(e.target.value)}
-                className="w-full h-11 px-3 rounded-lg border border-slate-200"
-              />
-              <p className="font-body-sm text-on-surface-variant mt-1">
-                Valor máximo simultâneo autorizado no PDV
-              </p>
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+                <div>
+                  <label htmlFor="cli-limit" className="block font-label-md mb-1">
+                    Limite de Crédito (R$) <span className="text-error">*</span>
+                  </label>
+                  <input
+                    id="cli-limit"
+                    type="number"
+                    step="10"
+                    required
+                    value={creditLimit}
+                    onChange={(e) => setCreditLimit(e.target.value)}
+                    className="w-full h-11 px-3 rounded-lg border border-slate-200"
+                  />
+                  <p className="font-body-sm text-on-surface-variant mt-1">
+                    Valor máximo simultâneo autorizado no PDV
+                  </p>
+                </div>
 
-            <div>
-              <label htmlFor="cli-day" className="block font-label-md mb-1">
-                Dia Preferencial de Pagamento
-              </label>
-              <select
-                id="cli-day"
-                value={dueDay}
-                onChange={(e) => setDueDay(e.target.value)}
-                className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white"
-              >
-                <option>Todo dia 05</option>
-                <option>Todo dia 10</option>
-                <option>Todo dia 15</option>
-                <option>Todo dia 20</option>
-                <option>Semanal / Sexta-feira</option>
-              </select>
-            </div>
-          </div>
+                <div>
+                  <label htmlFor="cli-day" className="block font-label-md mb-1">
+                    Dia Preferencial de Pagamento
+                  </label>
+                  <select
+                    id="cli-day"
+                    value={dueDay}
+                    onChange={(e) => setDueDay(e.target.value)}
+                    className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white"
+                  >
+                    <option>Todo dia 05</option>
+                    <option>Todo dia 10</option>
+                    <option>Todo dia 15</option>
+                    <option>Todo dia 20</option>
+                    <option>Semanal / Sexta-feira</option>
+                  </select>
+                </div>
+              </div>
 
-          <div className="p-4 rounded-xl bg-surface-container-low border border-surface-container flex items-center justify-between">
-            <div>
-              <span className="font-label-sm uppercase text-secondary">Saldo Devedor Atual • Novo Cliente</span>
-              <p className="font-headline-sm font-extrabold text-on-surface tabular-nums">R$ 0,00</p>
-            </div>
-            <div className="text-right">
-              <span className="font-label-sm uppercase text-on-surface-variant">Crédito Disponível</span>
-              <p className="font-headline-sm font-extrabold text-tertiary tabular-nums">
-                {formatBRL(limitNum)}
-              </p>
-            </div>
-          </div>
+              <div className="p-4 rounded-xl bg-surface-container-low border border-surface-container flex items-center justify-between">
+                <div>
+                  <span className="font-label-sm uppercase text-secondary">Saldo Devedor Atual • Novo Cliente</span>
+                  <p className="font-headline-sm font-extrabold text-on-surface tabular-nums">R$ 0,00</p>
+                </div>
+                <div className="text-right">
+                  <span className="font-label-sm uppercase text-on-surface-variant">Crédito Disponível</span>
+                  <p className="font-headline-sm font-extrabold text-tertiary tabular-nums">
+                    {formatBRL(limitNum)}
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
 
           <div>
             <label htmlFor="cli-notes" className="block font-label-md mb-1">Observações Internas</label>
