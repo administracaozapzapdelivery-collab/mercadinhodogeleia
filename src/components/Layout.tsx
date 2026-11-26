@@ -37,10 +37,10 @@ const navGroups: NavGroup[] = [
   {
     title: 'Catálogo e Estoque',
     items: [
-      { label: 'Produtos', path: '/produtos', icon: 'inventory_2', badge: '1.420', badgeTone: 'info' },
+      { label: 'Produtos', path: '/produtos', icon: 'inventory_2', badgeTone: 'info' },
       { label: 'Categorias', path: '/categorias', icon: 'category' },
       { label: 'Movimentações e Perdas', path: '/movimentacoes-e-perdas', icon: 'swap_horiz' },
-      { label: 'Alerta de Validade', path: '/alerta-de-validade', icon: 'event_busy', badge: '4', badgeTone: 'danger' },
+      { label: 'Alerta de Validade', path: '/alerta-de-validade', icon: 'event_busy', badgeTone: 'danger' },
       { label: 'Gerador de Etiquetas', path: '/etiquetas', icon: 'qr_code_2' },
     ],
   },
@@ -100,9 +100,10 @@ export function ErpLayout() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [expiringCount, setExpiringCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentUser, company, logout } = useErp();
+  const { currentUser, company, products, logout } = useErp();
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -119,11 +120,15 @@ export function ErpLayout() {
 
   useEffect(() => {
     void fetchNotifications();
+    fetch('/api/products/expiring')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setExpiringCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => setExpiringCount(0));
     const timer = setInterval(() => {
       void fetchNotifications();
     }, 60000);
     return () => clearInterval(timer);
-  }, [fetchNotifications, location.pathname]);
+  }, [fetchNotifications, location.pathname, products.length]);
 
   async function markNotificationRead(id: string) {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, lida: true } : n)));
@@ -213,17 +218,30 @@ export function ErpLayout() {
                     <span className="material-symbols-outlined text-[18px]">{item.icon}</span>
                     <span className="font-label-md text-label-md">{item.label}</span>
                   </div>
-                  {item.badge && (
-                    <span
-                      className={`font-label-sm text-label-sm px-1.5 py-0.5 font-bold ${
-                        item.badgeTone === 'danger'
-                          ? 'bg-error text-on-error rounded-full'
-                          : 'bg-secondary-container text-on-secondary-container rounded'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
+                  {(() => {
+                    const dynamicBadge =
+                      item.path === '/produtos'
+                        ? products.length > 0
+                          ? String(products.length)
+                          : undefined
+                        : item.path === '/alerta-de-validade'
+                          ? expiringCount > 0
+                            ? String(expiringCount)
+                            : undefined
+                          : item.badge;
+                    if (!dynamicBadge) return null;
+                    return (
+                      <span
+                        className={`font-label-sm text-label-sm px-1.5 py-0.5 font-bold ${
+                          item.badgeTone === 'danger'
+                            ? 'bg-error text-on-error rounded-full'
+                            : 'bg-secondary-container text-on-secondary-container rounded'
+                        }`}
+                      >
+                        {dynamicBadge}
+                      </span>
+                    );
+                  })()}
                 </NavLink>
               ))}
             </nav>
