@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/ui/SharedUI';
+import { PrintableReceipt, type ReceiptData } from '../components/PrintableReceipt';
 import { maskCnpj, maskPhone, cnpjError, phoneError } from '../utils/masks';
 
 type SettingsTab = 'geral' | 'pdv' | 'estoque' | 'backup';
@@ -97,32 +98,58 @@ export function SettingsPage() {
     setTestingPrint(true);
     setTestPrintStatus(null);
     try {
-      const res = await fetch('/api/print/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          printerName: cfg.nome_impressora,
-          width: cfg.largura_bobina,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setTestPrintStatus({
-          ok: true,
-          text: `Página de teste enviada para "${data.printerName}" (${data.widthMm})!`,
+      if (printersSupported) {
+        const res = await fetch('/api/print/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            printerName: cfg.nome_impressora,
+            width: cfg.largura_bobina,
+          }),
         });
-      } else {
-        setTestPrintStatus({
-          ok: false,
-          text: data.error || 'Falha ao enviar impressão de teste.',
-        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          setTestPrintStatus({
+            ok: true,
+            text: `Página de teste enviada para "${data.printerName}" (${data.widthMm})!`,
+          });
+          return;
+        }
       }
+
+      // Fallback para impressão via navegador (modo produção na nuvem)
+      setTestPrintStatus({
+        ok: true,
+        text: 'Abrindo janela de impressão do navegador (selecione a impressora padrão VOX(U) 1).',
+      });
+      setTimeout(() => {
+        window.print();
+      }, 120);
     } catch (err) {
       setTestPrintStatus({ ok: false, text: (err as Error).message });
     } finally {
       setTestingPrint(false);
     }
   }
+
+  const testReceiptData: ReceiptData = {
+    cupom: 'TESTE-0001',
+    date: new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date()),
+    operator: 'Administrador',
+    paymentMethod: 'Dinheiro',
+    items: [
+      { name: 'Teste de Impressão Térmica', quantity: 1, unit: 'un', unitPrice: 1.0, subtotal: 1.0 },
+    ],
+    subtotal: 1.0,
+    discount: 0,
+    total: 1.0,
+    cashReceived: 1.0,
+    changeDue: 0,
+  };
 
   async function handleSave() {
     setSubmitted(true);
@@ -325,7 +352,7 @@ export function SettingsPage() {
               <button
                 type="button"
                 onClick={() => void handleTestPrint()}
-                disabled={testingPrint || !printersSupported}
+                disabled={testingPrint}
                 className="px-4 py-2 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-50 text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5 shadow-sm"
               >
                 <span className="material-symbols-outlined text-[18px]">print</span>
@@ -344,6 +371,19 @@ export function SettingsPage() {
                 {testPrintStatus.text}
               </div>
             )}
+
+            <div className="print-only-container">
+              <PrintableReceipt
+                receipt={testReceiptData}
+                store={{
+                  nome_fantasia: cfg.nome_fantasia,
+                  cnpj: cfg.cnpj,
+                  telefone: cfg.telefone_whatsapp,
+                }}
+                twoCopies={false}
+                bobinaWidth={cfg.largura_bobina === '58mm' ? '58mm' : '80mm'}
+              />
+            </div>
           </div>
         )}
 

@@ -4,7 +4,7 @@ import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
 import type { PaymentMethod, Product } from '../types/erp';
 import { Modal, PasswordInput } from '../components/ui/SharedUI';
-import type { ReceiptData } from '../components/ReceiptModal';
+import { PrintableReceipt, type ReceiptData } from '../components/PrintableReceipt';
 import { maskCpf, maskPhone, cpfError, phoneError } from '../utils/masks';
 
 interface CartItem {
@@ -84,9 +84,21 @@ export function PdvPage() {
         scannerRef.current?.focus();
         return;
       }
+      if (data?.fallbackBrowser) {
+        setPrintConfirmOpen(false);
+        setTimeout(() => {
+          window.print();
+          scannerRef.current?.focus();
+        }, 120);
+        return;
+      }
       setPrintError(data?.error || 'Não foi possível enviar para a impressora.');
-    } catch (err) {
-      setPrintError((err as Error).message || 'Erro de comunicação com a impressora.');
+    } catch {
+      setPrintConfirmOpen(false);
+      setTimeout(() => {
+        window.print();
+        scannerRef.current?.focus();
+      }, 120);
     } finally {
       setPrintingReceipt(false);
     }
@@ -1367,6 +1379,16 @@ export function PdvPage() {
           </div>
         )}
       </Modal>
+
+      {lastReceipt && (
+        <div className="print-only-container">
+          <PrintableReceipt
+            receipt={lastReceipt}
+            store={company ?? {}}
+            twoCopies={lastReceipt.paymentMethod === 'Crediário'}
+          />
+        </div>
+      )}
     </div>
   );
 }
