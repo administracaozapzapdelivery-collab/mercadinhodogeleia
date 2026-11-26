@@ -73,7 +73,8 @@ mercadopagoRouter.post('/pix', requireAuth, async (req, res) => {
         data?.message ||
         data?.cause?.[0]?.description ||
         'Erro ao gerar cobrança PIX no Mercado Pago.';
-      res.status(mpRes.status || 502).json({ error: msg });
+      const safeStatus = mpRes.status === 401 || mpRes.status === 403 ? 400 : mpRes.status || 502;
+      res.status(safeStatus).json({ error: `Mercado Pago: ${msg}` });
       return;
     }
 
@@ -142,8 +143,9 @@ mercadopagoRouter.get('/pix/:paymentId', requireAuth, async (req, res) => {
     });
     const data = (await mpRes.json().catch(() => null)) as Record<string, any> | null;
     if (!mpRes.ok || !data) {
-      res.status(mpRes.status || 502).json({
-        error: data?.message || 'Erro ao consultar status do PIX no Mercado Pago.',
+      const safeStatus = mpRes.status === 401 || mpRes.status === 403 ? 400 : mpRes.status || 502;
+      res.status(safeStatus).json({
+        error: `Mercado Pago: ${data?.message || 'Erro ao consultar status do PIX no Mercado Pago.'}`,
       });
       return;
     }
