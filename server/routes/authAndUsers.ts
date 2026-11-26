@@ -298,6 +298,14 @@ authAndUsersRouter.delete('/users/:id', requireAuth, requireRole('ADMIN'), async
       res.status(400).json({ error: 'Não é possível excluir o próprio usuário logado.' });
       return;
     }
+    const existing = await pool.query<{ email: string }>(
+      'SELECT email FROM usuarios WHERE id = $1',
+      [id]
+    );
+    if ((existing.rows[0]?.email ?? '').trim().toLowerCase() === 'everaldozs@gmail.com') {
+      res.status(403).json({ error: 'O usuário administrador principal não pode ser excluído.' });
+      return;
+    }
     try {
       await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
       await logAudit(req.user!.id, 'EXCLUIU_USUARIO', 'usuarios', id);

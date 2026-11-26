@@ -15,6 +15,12 @@ const permissionLabels: { key: string; label: string }[] = [
   { key: 'gerenciar_usuarios_config', label: 'Gerenciar Usuários e Configurações' },
 ];
 
+const PROTECTED_ADMIN_EMAIL = 'everaldozs@gmail.com';
+
+function isProtectedUser(u: SystemUser): boolean {
+  return u.email.trim().toLowerCase() === PROTECTED_ADMIN_EMAIL;
+}
+
 export function UsersPage() {
   const navigate = useNavigate();
   const { users, updateUser, deleteUser, unlockUser } = useErp();
@@ -69,7 +75,7 @@ export function UsersPage() {
   }
 
   async function handleConfirmDelete() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || isProtectedUser(deleteTarget)) return;
     setSaving(true);
     setDeleteError(null);
     try {
@@ -151,9 +157,20 @@ export function UsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-surface-container">
-            {visibleUsers.map((u) => (
+            {visibleUsers.map((u) => {
+              const protectedUser = isProtectedUser(u);
+              return (
               <tr key={u.id} className="hover:bg-surface-container-low/50">
-                <td className="px-space-lg py-3 font-label-lg font-bold">{u.name}</td>
+                <td className="px-space-lg py-3 font-label-lg font-bold">
+                  <div className="flex items-center gap-2">
+                    <span>{u.name}</span>
+                    {protectedUser && (
+                      <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-primary-container font-label-sm font-bold">
+                        Principal
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-space-lg py-3 text-body-sm text-on-surface-variant">{u.email}</td>
                 <td className="px-space-lg py-3">
                   <StatusBadge label={u.role} tone="info" />
@@ -206,22 +223,25 @@ export function UsersPage() {
                     >
                       <span className="material-symbols-outlined text-[18px]">edit</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteError(null);
-                        setDeleteTarget(u);
-                      }}
-                      title="Excluir usuário"
-                      aria-label={`Excluir ${u.name}`}
-                      className="p-2 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
+                    {!protectedUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setDeleteTarget(u);
+                        }}
+                        title="Excluir usuário"
+                        aria-label={`Excluir ${u.name}`}
+                        className="p-2 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
