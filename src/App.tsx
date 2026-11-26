@@ -1,38 +1,54 @@
+import { lazy, Suspense, type ComponentType } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ErpProvider } from './context/ErpContext';
 import { ErpLayout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { LoginPage } from './pages/LoginPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { PdvPage } from './pages/PdvPage';
-import { SalesPage } from './pages/SalesPage';
-import { ProductsPage } from './pages/ProductsPage';
-import { CategoriesPage } from './pages/CategoriesPage';
-import { MovementsPage } from './pages/MovementsPage';
-import { ExpiryAlertsPage } from './pages/ExpiryAlertsPage';
-import { CustomersPage } from './pages/CustomersPage';
-import { SuppliersPage } from './pages/SuppliersPage';
-import { CashFlowPage } from './pages/CashFlowPage';
-import { PayablesPage } from './pages/PayablesPage';
-import { ReportsPage } from './pages/ReportsPage';
-import { UsersPage } from './pages/UsersPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { CompanyDataPage } from './pages/CompanyDataPage';
-import { LabelsPage } from './pages/LabelsPage';
-import { CategoryFormPage } from './pages/forms/CategoryFormPage';
-import { ProductFormPage } from './pages/forms/ProductFormPage';
-import { CustomerFormPage } from './pages/forms/CustomerFormPage';
-import { SupplierFormPage } from './pages/forms/SupplierFormPage';
-import { PayableFormPage } from './pages/forms/PayableFormPage';
-import { UserFormPage } from './pages/forms/UserFormPage';
-import { MovementFormPage } from './pages/forms/MovementFormPage';
-import { CashShiftFormPage } from './pages/forms/CashShiftFormPage';
+
+function lazyNamed<T extends Record<string, ComponentType>>(
+  loader: () => Promise<T>,
+  name: keyof T
+) {
+  return lazy(async () => ({ default: (await loader())[name] }));
+}
+
+const LoginPage = lazyNamed(() => import('./pages/LoginPage'), 'LoginPage');
+const DashboardPage = lazyNamed(() => import('./pages/DashboardPage'), 'DashboardPage');
+const PdvPage = lazyNamed(() => import('./pages/PdvPage'), 'PdvPage');
+const SalesPage = lazyNamed(() => import('./pages/SalesPage'), 'SalesPage');
+const ProductsPage = lazyNamed(() => import('./pages/ProductsPage'), 'ProductsPage');
+const CategoriesPage = lazyNamed(() => import('./pages/CategoriesPage'), 'CategoriesPage');
+const MovementsPage = lazyNamed(() => import('./pages/MovementsPage'), 'MovementsPage');
+const ExpiryAlertsPage = lazyNamed(() => import('./pages/ExpiryAlertsPage'), 'ExpiryAlertsPage');
+const CustomersPage = lazyNamed(() => import('./pages/CustomersPage'), 'CustomersPage');
+const SuppliersPage = lazyNamed(() => import('./pages/SuppliersPage'), 'SuppliersPage');
+const CashFlowPage = lazyNamed(() => import('./pages/CashFlowPage'), 'CashFlowPage');
+const PayablesPage = lazyNamed(() => import('./pages/PayablesPage'), 'PayablesPage');
+const ReportsPage = lazyNamed(() => import('./pages/ReportsPage'), 'ReportsPage');
+const UsersPage = lazyNamed(() => import('./pages/UsersPage'), 'UsersPage');
+const SettingsPage = lazyNamed(() => import('./pages/SettingsPage'), 'SettingsPage');
+const CompanyDataPage = lazyNamed(() => import('./pages/CompanyDataPage'), 'CompanyDataPage');
+const LabelsPage = lazyNamed(() => import('./pages/LabelsPage'), 'LabelsPage');
+const CategoryFormPage = lazyNamed(() => import('./pages/forms/CategoryFormPage'), 'CategoryFormPage');
+const ProductFormPage = lazyNamed(() => import('./pages/forms/ProductFormPage'), 'ProductFormPage');
+const CustomerFormPage = lazyNamed(() => import('./pages/forms/CustomerFormPage'), 'CustomerFormPage');
+const SupplierFormPage = lazyNamed(() => import('./pages/forms/SupplierFormPage'), 'SupplierFormPage');
+const PayableFormPage = lazyNamed(() => import('./pages/forms/PayableFormPage'), 'PayableFormPage');
+const UserFormPage = lazyNamed(() => import('./pages/forms/UserFormPage'), 'UserFormPage');
+const MovementFormPage = lazyNamed(() => import('./pages/forms/MovementFormPage'), 'MovementFormPage');
+const CashShiftFormPage = lazyNamed(() => import('./pages/forms/CashShiftFormPage'), 'CashShiftFormPage');
 
 export function App() {
   return (
     <ErpProvider>
       <BrowserRouter>
-        <Routes>
+        <Suspense
+          fallback={
+            <div className="min-h-screen flex items-center justify-center text-on-surface-variant font-label-lg">
+              Carregando módulo...
+            </div>
+          }
+        >
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
 
           <Route element={<ProtectedRoute />}>
@@ -83,6 +99,7 @@ export function App() {
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </ErpProvider>
   );

@@ -7,6 +7,7 @@ import { Modal, PageHeader, StatusBadge } from '../components/ui/SharedUI';
 import { CrudActionButtons, DeleteConfirmModal } from '../components/ui/CrudActions';
 
 type ProductQuickFilter = 'all' | 'expired' | 'expiring' | 'low_stock' | 'out_of_stock';
+type ProductSort = 'name' | 'stock_asc' | 'margin_desc' | 'expiry_asc';
 
 function toLocalISODate(date: Date): string {
   const y = date.getFullYear();
@@ -32,8 +33,10 @@ const FILTER_LABELS: Record<Exclude<ProductQuickFilter, 'all'>, string> = {
 
 export function ProductsPage() {
   const navigate = useNavigate();
-  const { products, deleteProduct } = useErp();
+  const { products, categories, deleteProduct } = useErp();
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<ProductSort>('name');
   const [quickFilter, setQuickFilter] = useState<ProductQuickFilter>('all');
   const [alertDays, setAlertDays] = useState(15);
   const [viewItem, setViewItem] = useState<Product | null>(null);
@@ -102,13 +105,15 @@ export function ProductsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return products.filter((p) => {
+    const list = products.filter((p) => {
       const matchesSearch =
         !q ||
         p.name.toLowerCase().includes(q) ||
         p.sku.toLowerCase().includes(q) ||
         p.barcode.includes(q);
       if (!matchesSearch) return false;
+
+      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
 
       switch (quickFilter) {
         case 'expired':
@@ -125,7 +130,23 @@ export function ProductsPage() {
           return true;
       }
     });
-  }, [products, search, quickFilter, stats.todayStr, stats.limitStr]);
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'stock_asc') return a.stock - b.stock;
+      if (sortBy === 'margin_desc') {
+        const ma = a.salePrice > 0 ? (a.salePrice - a.costPrice) / a.salePrice : 0;
+        const mb = b.salePrice > 0 ? (b.salePrice - b.costPrice) / b.salePrice : 0;
+        return mb - ma;
+      }
+      if (sortBy === 'expiry_asc') {
+        if (!a.expiryDate && !b.expiryDate) return a.name.localeCompare(b.name);
+        if (!a.expiryDate) return 1;
+        if (!b.expiryDate) return -1;
+        return a.expiryDate.localeCompare(b.expiryDate);
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [products, search, categoryFilter, sortBy, quickFilter, stats.todayStr, stats.limitStr]);
 
   const toggleFilter = (target: Exclude<ProductQuickFilter, 'all'>) => {
     setQuickFilter((prev) => (prev === target ? 'all' : target));
@@ -353,14 +374,38 @@ export function ProductsPage() {
         </div>
       </section>
 
-      <div className="bg-surface-container-lowest p-space-md rounded-xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center gap-space-sm">
+      <div className="bg-surface-container-lowest p-space-md rounded-xl border border-slate-200/80 shadow-sm flex flex-col lg:flex-row lg:items-center gap-space-sm">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar por nome, SKU ou código de barras..."
-          className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-secondary"
+          className="flex-1 h-10 px-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-secondary"
         />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          aria-label="Filtrar por categoria"
+          className="h-10 px-3 rounded-lg border border-slate-200 bg-white text-on-surface font-body-sm focus:outline-none focus:ring-2 focus:ring-secondary"
+        >
+          <option value="all">Todas as categorias</option>
+          {categories.map((cat) => (
+            <option key={cat.id} value={cat.name}>
+              {cat.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as ProductSort)}
+          aria-label="Ordenar produtos"
+          className="h-10 px-3 rounded-lg border border-slate-200 bg-white text-on-surface font-body-sm focus:outline-none focus:ring-2 focus:ring-secondary"
+        >
+          <option value="name">Ordem: Nome (A-Z)</option>
+          <option value="stock_asc">Ordem: Menor estoque</option>
+          <option value="margin_desc">Ordem: Maior margem</option>
+          <option value="expiry_asc">Ordem: Validade mais próxima</option>
+        </select>
         {quickFilter !== 'all' && (
           <button
             type="button"

@@ -40,6 +40,8 @@ export function CustomersPage() {
   const [deleting, setDeleting] = useState(false);
   const [entries, setEntries] = useState<FiadoEntry[]>([]);
   const [payAmount, setPayAmount] = useState('');
+  const [payError, setPayError] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
 
   const stats = useMemo(() => {
     let totalDebt = 0;
@@ -105,7 +107,8 @@ export function CustomersPage() {
 
   async function openFiado(customer: Customer) {
     setSelected(customer);
-    setPayAmount(String(customer.currentDebt || ''));
+    setPayError(null);
+    setPayAmount(customer.currentDebt > 0 ? customer.currentDebt.toFixed(2) : '');
     const res = await fetch(`/api/customers/${customer.id}/fiado`);
     if (res.ok) setEntries(await res.json());
   }
@@ -113,13 +116,29 @@ export function CustomersPage() {
   async function handleAbate(e: React.FormEvent) {
     e.preventDefault();
     if (!selected) return;
-    await fetch(`/api/customers/${selected.id}/fiado/pay`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: Number(payAmount) }),
-    });
-    await refreshData();
-    setSelected(null);
+    const amount = Number(payAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPayError('Informe um valor maior que zero para abater.');
+      return;
+    }
+    setPaying(true);
+    setPayError(null);
+    try {
+      const res = await fetch(`/api/customers/${selected.id}/fiado/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setPayError(body?.error ?? 'Não foi possível registrar o pagamento.');
+        return;
+      }
+      await refreshData();
+      setSelected(null);
+    } finally {
+      setPaying(false);
+    }
   }
 
   return (
@@ -492,22 +511,51 @@ export function CustomersPage() {
               </span>
             </div>
 
-            <form onSubmit={handleAbate} className="flex gap-2">
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                placeholder="Valor a abater (R$)"
-                className="flex-1 h-10 px-3 rounded-lg border border-slate-200"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-[#3DDB8F] text-[#0F172A] font-label-md font-bold"
-              >
-                Abater Dívida
-              </button>
+            <form onSubmit={handleAbate} className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder="Valor a abater (R$)"
+                  className="flex-1 min-w-[140px] h-10 px-3 rounded-lg border border-slate-200"
+                />
+                {selected.currentDebt > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(selected.currentDebt.toFixed(2))}
+                    className="px-3 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md font-bold"
+                  >
+                    Quitar Tudo
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={paying}
+                  className="px-4 py-2 rounded-lg bg-[#3DDB8F] text-[#0F172A] font-label-md font-bold disabled:opacity-50"
+                >
+                  {paying ? 'Salvando...' : 'Abater Dívida'}
+                </button>
+              </div>
+              {payError && (
+                <p className="font-label-sm font-bold text-error">{payError}</p>
+              )}
+              {selected.currentDebt > 0 && selected.phone.replace(/\D/g, '').length >= 10 && (
+                <a
+                  href={`https://wa.me/55${selected.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                    `Olá ${selected.name}, tudo bem? Passando para lembrar do seu saldo em aberto no crediário do Mercadinho do Geleia: ${formatBRL(selected.currentDebt)}.`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-tertiary font-label-md font-bold hover:underline pt-1"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chat</span>
+                  <span>Enviar lembrete por WhatsApp</span>
+                </a>
+              )}
             </form>
 
             <div className="space-y-2 max-h-48 overflow-y-auto">
