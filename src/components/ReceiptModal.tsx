@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useErp } from '../context/ErpContext';
 import type { CompanyData } from '../types/erp';
 import { PrintableReceipt, type ReceiptData, type ReceiptItem } from './PrintableReceipt';
+import { printReceiptDirect } from '../utils/printClient';
 
 export type { ReceiptData, ReceiptItem };
 
@@ -65,32 +66,20 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
       setPrinting(true);
       setPrintStatus(null);
       try {
-        const res = await fetch('/api/print/receipt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            receipt,
-            twoCopies: copies,
-            printerName,
-            width: bobinaWidth,
-          }),
+        const result = await printReceiptDirect({
+          receipt,
+          twoCopies: copies,
+          store,
+          printerName,
+          width: bobinaWidth,
         });
-        const data = await res.json().catch(() => null);
-        if (res.ok && data?.ok) {
+        if (result.ok) {
           setPrintStatus({
             ok: true,
-            text: `Cupom enviado para "${data.printerName}"!`,
+            text: `Cupom enviado para "${result.printerName}"!`,
           });
           return;
         }
-        if (data?.fallbackBrowser) {
-          window.print();
-          return;
-        }
-        setPrintStatus({
-          ok: false,
-          text: data?.error || 'Falha na impressão direta. Usando navegador...',
-        });
         window.print();
       } catch {
         window.print();
@@ -98,7 +87,7 @@ export function ReceiptModal({ open, receipt, autoPrint = false, onClose }: Rece
         setPrinting(false);
       }
     },
-    [receipt, printerName, bobinaWidth]
+    [receipt, store, printerName, bobinaWidth]
   );
 
   useEffect(() => {

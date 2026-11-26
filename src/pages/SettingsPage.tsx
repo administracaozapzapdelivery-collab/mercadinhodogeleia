@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/ui/SharedUI';
 import { PrintableReceipt, type ReceiptData } from '../components/PrintableReceipt';
+import {
+  fetchAvailablePrinters,
+  printTestDirect,
+  type PrinterOption,
+} from '../utils/printClient';
 import { maskCnpj, maskPhone, cnpjError, phoneError } from '../utils/masks';
 
 type SettingsTab = 'geral' | 'pdv' | 'estoque' | 'backup';
@@ -24,14 +29,6 @@ interface ConfigState {
   exigir_abertura_caixa: boolean;
   registrar_log_auditoria: boolean;
   meta_diaria_faturamento: number;
-}
-
-interface PrinterOption {
-  name: string;
-  driverName: string;
-  portName: string;
-  status: string;
-  isDefault: boolean;
 }
 
 interface BackupRow {
@@ -70,14 +67,10 @@ export function SettingsPage() {
 
   const loadPrinters = () => {
     setLoadingPrinters(true);
-    fetch('/api/print/printers')
-      .then((r) => (r.ok ? r.json() : null))
+    fetchAvailablePrinters()
       .then((data) => {
-        if (!data) return;
-        setPrintersSupported(Boolean(data.supported));
-        if (Array.isArray(data.printers)) {
-          setPrinters(data.printers);
-        }
+        setPrintersSupported(data.supported);
+        setPrinters(data.printers);
       })
       .catch(() => null)
       .finally(() => setLoadingPrinters(false));
@@ -98,29 +91,27 @@ export function SettingsPage() {
     setTestingPrint(true);
     setTestPrintStatus(null);
     try {
-      if (printersSupported) {
-        const res = await fetch('/api/print/test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            printerName: cfg.nome_impressora,
-            width: cfg.largura_bobina,
-          }),
+      const result = await printTestDirect({
+        printerName: cfg.nome_impressora,
+        width: cfg.largura_bobina === '58mm' ? '58mm' : '80mm',
+        store: {
+          nome_fantasia: cfg.nome_fantasia,
+          cnpj: cfg.cnpj,
+          telefone: cfg.telefone_whatsapp,
+        },
+      });
+      if (result.ok) {
+        setTestPrintStatus({
+          ok: true,
+          text: `Página de teste enviada direto para "${result.printerName}" (${result.widthMm})!`,
         });
-        const data = await res.json();
-        if (res.ok && data.ok) {
-          setTestPrintStatus({
-            ok: true,
-            text: `Página de teste enviada para "${data.printerName}" (${data.widthMm})!`,
-          });
-          return;
-        }
+        return;
       }
 
-      // Fallback para impressão via navegador (modo produção na nuvem)
+      // Fallback para impressão via navegador caso o agente local não esteja ativo
       setTestPrintStatus({
         ok: true,
-        text: 'Abrindo janela de impressão do navegador (selecione a impressora padrão VOX(U) 1).',
+        text: 'Agente local não detectado — abrindo janela de impressão do navegador.',
       });
       setTimeout(() => {
         window.print();

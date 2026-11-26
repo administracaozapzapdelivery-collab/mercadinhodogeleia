@@ -5,6 +5,7 @@ import { formatBRL } from '../data/mockData';
 import type { PaymentMethod, Product } from '../types/erp';
 import { Modal, PasswordInput } from '../components/ui/SharedUI';
 import { PrintableReceipt, type ReceiptData } from '../components/PrintableReceipt';
+import { printReceiptDirect } from '../utils/printClient';
 import { maskCpf, maskPhone, cpfError, phoneError } from '../utils/masks';
 
 interface CartItem {
@@ -70,21 +71,17 @@ export function PdvPage() {
     setPrintError(null);
     try {
       const twoCopies = targetReceipt.paymentMethod === 'Crediário';
-      const res = await fetch('/api/print/receipt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receipt: targetReceipt,
-          twoCopies,
-        }),
+      const result = await printReceiptDirect({
+        receipt: targetReceipt,
+        twoCopies,
+        store: company,
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.ok) {
+      if (result.ok) {
         setPrintConfirmOpen(false);
         scannerRef.current?.focus();
         return;
       }
-      if (data?.fallbackBrowser) {
+      if (result.fallbackBrowser) {
         setPrintConfirmOpen(false);
         setTimeout(() => {
           window.print();
@@ -92,7 +89,7 @@ export function PdvPage() {
         }, 120);
         return;
       }
-      setPrintError(data?.error || 'Não foi possível enviar para a impressora.');
+      setPrintError(result.error || 'Não foi possível enviar para a impressora.');
     } catch {
       setPrintConfirmOpen(false);
       setTimeout(() => {
