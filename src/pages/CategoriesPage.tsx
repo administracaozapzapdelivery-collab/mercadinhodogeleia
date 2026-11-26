@@ -198,45 +198,54 @@ export function CategoriesPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-space-md">
-        {filtered.length === 0 ? (
-          <div className="col-span-full bg-surface-container-lowest p-space-lg rounded-xl border border-slate-200/80 shadow-sm text-center text-on-surface-variant">
-            Nenhuma categoria encontrada para o filtro selecionado.
-          </div>
-        ) : (
-          filtered.map((cat) => (
-          <div
-            key={cat.id}
-            className="bg-surface-container-lowest p-space-lg rounded-xl border border-slate-200/80 shadow-sm flex flex-col justify-between gap-3"
-          >
-            <div>
-              <div className="flex items-center justify-between">
-                <h2 className="font-headline-sm font-bold text-primary">{cat.name}</h2>
-                <span className="px-2.5 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-sm font-bold">
-                  Margem alvo: {cat.marginTarget}%
-                </span>
-              </div>
-              <p className="font-body-sm text-on-surface-variant mt-1">{cat.description}</p>
-            </div>
-            <div className="pt-2 border-t border-surface-container flex items-center justify-between text-body-sm">
-              <div>
-                <span className="text-on-surface-variant">Produtos: </span>
-                <span className="font-label-lg font-bold text-on-surface tabular-nums">
-                  {cat.productCount}
-                </span>
-              </div>
-              <CrudActionButtons
-                onView={() => setViewItem(cat)}
-                onEdit={() => navigate(`/categorias/${cat.id}/editar`)}
-                onDelete={() => {
-                  setDeleteErr(null);
-                  setDeleteTarget(cat);
-                }}
-              />
-            </div>
-          </div>
-          ))
-        )}
+      <div className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-surface-container-low text-on-surface-variant font-label-sm uppercase">
+              <th className="px-space-lg py-3">Categoria</th>
+              <th className="px-space-lg py-3">Descrição</th>
+              <th className="px-space-lg py-3">Margem Alvo</th>
+              <th className="px-space-lg py-3 text-right">Produtos</th>
+              <th className="px-space-lg py-3 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-surface-container">
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-space-lg py-8 text-center text-on-surface-variant">
+                  Nenhuma categoria encontrada para o filtro selecionado.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((cat) => (
+                <tr key={cat.id} className="hover:bg-surface-container-low/50">
+                  <td className="px-space-lg py-3 font-label-lg font-bold text-primary whitespace-nowrap">
+                    {cat.name}
+                  </td>
+                  <td className="px-space-lg py-3 font-body-sm text-on-surface-variant">
+                    {cat.description || '—'}
+                  </td>
+                  <td className="px-space-lg py-3 whitespace-nowrap">
+                    <StatusBadge label={`${cat.marginTarget}%`} tone="info" />
+                  </td>
+                  <td className="px-space-lg py-3 text-right font-bold tabular-nums whitespace-nowrap">
+                    {cat.productCount} {cat.productCount === 1 ? 'produto' : 'produtos'}
+                  </td>
+                  <td className="px-space-lg py-3 text-right">
+                    <CrudActionButtons
+                      onView={() => setViewItem(cat)}
+                      onEdit={() => navigate(`/categorias/${cat.id}/editar`)}
+                      onDelete={() => {
+                        setDeleteErr(null);
+                        setDeleteTarget(cat);
+                      }}
+                    />
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       <Modal
