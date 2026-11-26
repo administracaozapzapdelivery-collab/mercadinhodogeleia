@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
@@ -14,9 +14,20 @@ interface FiadoEntry {
   date: string;
 }
 
+type CustomerQuickFilter = 'all' | 'with_debt' | 'em_dia' | 'atencao' | 'bloqueado';
+
+const CUSTOMER_FILTER_LABELS: Record<Exclude<CustomerQuickFilter, 'all'>, string> = {
+  with_debt: 'Com Saldo Devedor',
+  em_dia: 'Em dia',
+  atencao: 'Em Atenção',
+  bloqueado: 'Bloqueados',
+};
+
 export function CustomersPage() {
   const navigate = useNavigate();
   const { customers, deleteCustomer, refreshData } = useErp();
+  const [search, setSearch] = useState('');
+  const [quickFilter, setQuickFilter] = useState<CustomerQuickFilter>('all');
   const [selected, setSelected] = useState<Customer | null>(null);
   const [viewItem, setViewItem] = useState<Customer | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
@@ -24,6 +35,68 @@ export function CustomersPage() {
   const [deleting, setDeleting] = useState(false);
   const [entries, setEntries] = useState<FiadoEntry[]>([]);
   const [payAmount, setPayAmount] = useState('');
+
+  const stats = useMemo(() => {
+    let totalDebt = 0;
+    let totalLimit = 0;
+    let withDebtCount = 0;
+    let emDiaCount = 0;
+    let atencaoCount = 0;
+    let bloqueadoCount = 0;
+
+    for (const c of customers) {
+      totalDebt += c.currentDebt;
+      totalLimit += c.creditLimit;
+      if (c.currentDebt > 0) withDebtCount++;
+      if (c.status === 'Em dia') emDiaCount++;
+      else if (c.status === 'Atenção') atencaoCount++;
+      else if (c.status === 'Bloqueado') bloqueadoCount++;
+    }
+
+    const availableCredit = Math.max(0, totalLimit - totalDebt);
+    const creditUsagePct = totalLimit > 0 ? Math.min(100, Math.round((totalDebt / totalLimit) * 100)) : 0;
+
+    return {
+      totalCustomers: customers.length,
+      totalDebt,
+      totalLimit,
+      availableCredit,
+      creditUsagePct,
+      withDebtCount,
+      emDiaCount,
+      atencaoCount,
+      bloqueadoCount,
+    };
+  }, [customers]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return customers.filter((c) => {
+      const matchesSearch =
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.cpf.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q);
+      if (!matchesSearch) return false;
+
+      switch (quickFilter) {
+        case 'with_debt':
+          return c.currentDebt > 0;
+        case 'em_dia':
+          return c.status === 'Em dia';
+        case 'atencao':
+          return c.status === 'Atenção';
+        case 'bloqueado':
+          return c.status === 'Bloqueado';
+        default:
+          return true;
+      }
+    });
+  }, [customers, search, quickFilter]);
+
+  const toggleFilter = (target: Exclude<CustomerQuickFilter, 'all'>) => {
+    setQuickFilter((prev) => (prev === target ? 'all' : target));
+  };
 
   async function openFiado(customer: Customer) {
     setSelected(customer);
@@ -62,6 +135,202 @@ export function CustomersPage() {
         }
       />
 
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-space-md">
+        <button
+          type="button"
+          onClick={() => setQuickFilter('all')}
+          className={`text-left bg-surface-container-lowest p-space-md rounded-xl border shadow-sm transition-all flex flex-col justify-between ${
+            quickFilter === 'all'
+              ? 'border-primary/40 ring-2 ring-primary/15'
+              : 'border-slate-200/80 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary-container">
+                <span className="material-symbols-outlined text-[22px]">groups</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Total de Clientes</span>
+            </div>
+            <StatusBadge label="Cadastro" tone="info" />
+          </div>
+          <div>
+            <span className="font-numeric-total text-2xl font-bold text-primary block tabular-nums">
+              {stats.totalCustomers} {stats.totalCustomers === 1 ? 'cliente' : 'clientes'}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              {stats.withDebtCount} {stats.withDebtCount === 1 ? 'com saldo em aberto' : 'com saldo em aberto'}
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleFilter('with_debt')}
+          className={`text-left bg-surface-container-lowest p-space-md rounded-xl border shadow-sm transition-all flex flex-col justify-between ${
+            quickFilter === 'with_debt'
+              ? 'border-secondary ring-2 ring-secondary/20'
+              : 'border-slate-200/80 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary">
+                <span className="material-symbols-outlined text-[22px]">menu_book</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Total a Receber</span>
+            </div>
+            <StatusBadge label="Caderneta" tone="info" />
+          </div>
+          <div>
+            <span className="font-numeric-total text-2xl font-bold text-secondary block tabular-nums">
+              {formatBRL(stats.totalDebt)}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              Limite total concedido: {formatBRL(stats.totalLimit)}
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleFilter('em_dia')}
+          className={`text-left bg-surface-container-lowest p-space-md rounded-xl border shadow-sm transition-all flex flex-col justify-between ${
+            quickFilter === 'em_dia'
+              ? 'border-tertiary ring-2 ring-tertiary/20'
+              : 'border-slate-200/80 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-tertiary-fixed/50 flex items-center justify-center text-tertiary">
+                <span className="material-symbols-outlined text-[22px]">check_circle</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Clientes Em Dia</span>
+            </div>
+            <StatusBadge label="Regular" tone="success" />
+          </div>
+          <div>
+            <span className="font-numeric-total text-2xl font-bold text-tertiary block tabular-nums">
+              {stats.emDiaCount} {stats.emDiaCount === 1 ? 'cliente' : 'clientes'}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              Situação financeira regularizada
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleFilter('atencao')}
+          className={`text-left bg-surface-container-lowest p-space-md rounded-xl border shadow-sm transition-all flex flex-col justify-between ${
+            quickFilter === 'atencao'
+              ? 'border-amber-500 ring-2 ring-amber-500/20'
+              : 'border-slate-200/80 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-800">
+                <span className="material-symbols-outlined text-[22px]">warning</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Em Atenção</span>
+            </div>
+            <StatusBadge
+              label={stats.atencaoCount > 0 ? 'Cobrança' : 'Em dia'}
+              tone={stats.atencaoCount > 0 ? 'warning' : 'success'}
+            />
+          </div>
+          <div>
+            <span
+              className={`font-numeric-total text-2xl font-bold block tabular-nums ${
+                stats.atencaoCount > 0 ? 'text-amber-800' : 'text-on-surface'
+              }`}
+            >
+              {stats.atencaoCount} {stats.atencaoCount === 1 ? 'cliente' : 'clientes'}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              Saldo próximo do limite ou pendente
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleFilter('bloqueado')}
+          className={`text-left bg-surface-container-lowest p-space-md rounded-xl border shadow-sm transition-all flex flex-col justify-between ${
+            quickFilter === 'bloqueado'
+              ? 'border-error ring-2 ring-error/20'
+              : 'border-slate-200/80 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-error-container flex items-center justify-center text-error">
+                <span className="material-symbols-outlined text-[22px]">block</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Bloqueados</span>
+            </div>
+            <StatusBadge
+              label={stats.bloqueadoCount > 0 ? 'Restrito' : 'Nenhum'}
+              tone={stats.bloqueadoCount > 0 ? 'danger' : 'success'}
+            />
+          </div>
+          <div>
+            <span
+              className={`font-numeric-total text-2xl font-bold block tabular-nums ${
+                stats.bloqueadoCount > 0 ? 'text-error' : 'text-on-surface'
+              }`}
+            >
+              {stats.bloqueadoCount} {stats.bloqueadoCount === 1 ? 'cliente' : 'clientes'}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              Crediário suspenso no PDV
+            </span>
+          </div>
+        </button>
+
+        <div className="bg-surface-container-lowest p-space-md rounded-xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-space-sm">
+              <div className="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center text-primary">
+                <span className="material-symbols-outlined text-[22px]">account_balance_wallet</span>
+              </div>
+              <span className="font-label-lg text-on-surface-variant">Crédito Disponível</span>
+            </div>
+            <StatusBadge label={`Uso ${stats.creditUsagePct}%`} tone="neutral" />
+          </div>
+          <div>
+            <span className="font-numeric-total text-2xl font-bold text-primary block tabular-nums">
+              {formatBRL(stats.availableCredit)}
+            </span>
+            <span className="font-body-sm text-on-surface-variant">
+              Margem livre nos limites ativos
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <div className="bg-surface-container-lowest p-space-md rounded-xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center gap-space-sm">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome, CPF ou telefone..."
+          className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-secondary"
+        />
+        {quickFilter !== 'all' && (
+          <button
+            type="button"
+            onClick={() => setQuickFilter('all')}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 h-10 rounded-lg bg-primary-fixed text-primary-container font-label-md font-bold hover:bg-primary-fixed/80 transition-colors"
+          >
+            <span>Filtro: {CUSTOMER_FILTER_LABELS[quickFilter]}</span>
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        )}
+      </div>
+
       <div className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -76,7 +345,14 @@ export function CustomersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-surface-container">
-            {customers.map((c) => (
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-space-lg py-8 text-center text-on-surface-variant">
+                  Nenhum cliente encontrado para os filtros selecionados.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((c) => (
               <tr key={c.id} className="hover:bg-surface-container-low/50">
                 <td className="px-space-lg py-3">
                   <p className="font-label-lg font-bold text-on-surface">{c.name}</p>
@@ -119,7 +395,8 @@ export function CustomersPage() {
                   />
                 </td>
               </tr>
-            ))}
+              ))
+            )}
           </tbody>
         </table>
       </div>
