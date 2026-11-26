@@ -72,6 +72,7 @@ export function SettingsPage() {
   const [testingPrint, setTestingPrint] = useState(false);
   const [testingMp, setTestingMp] = useState(false);
   const [mpTestStatus, setMpTestStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   const cnpjErr = submitted && cfg.cnpj ? cnpjError(cfg.cnpj) : '';
   const phoneErr = submitted && cfg.telefone_whatsapp ? phoneError(cfg.telefone_whatsapp) : '';
@@ -471,6 +472,35 @@ export function SettingsPage() {
                   className="w-full h-10 px-3 rounded-lg border border-slate-200 font-mono text-xs"
                 />
               </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-surface-container-low border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="font-label-md font-bold text-on-surface">
+                  URL de Webhook (Mercado Pago Developers)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = `${window.location.origin}/api/mercadopago/webhook`;
+                    void navigator.clipboard?.writeText(url);
+                    setWebhookCopied(true);
+                    setTimeout(() => setWebhookCopied(false), 2000);
+                  }}
+                  className="text-xs font-bold text-primary-container hover:underline"
+                >
+                  {webhookCopied ? 'URL copiada!' : 'Copiar URL'}
+                </button>
+              </div>
+              <input
+                readOnly
+                value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/mercadopago/webhook`}
+                className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white font-mono text-xs text-on-surface"
+              />
+              <p className="font-body-sm text-on-surface-variant">
+                No painel <strong>Mercado Pago Developers → Webhooks → Modo Produção</strong>, cole
+                esta URL e marque o evento <strong>Pagamentos (payment)</strong>.
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">

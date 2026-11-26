@@ -59,6 +59,17 @@ export async function initDatabase() {
       'APP_USR-6816043027376004-112609-9b2762d1ed0bb638bb63b6778a056be7-3879037648',
     ]
   );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mp_pix_pagamentos (
+      payment_id VARCHAR(64) PRIMARY KEY,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      status_detail VARCHAR(64),
+      transaction_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+      date_approved TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `);
   await pool.query(
     'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tentativas_login INTEGER NOT NULL DEFAULT 0'
   );

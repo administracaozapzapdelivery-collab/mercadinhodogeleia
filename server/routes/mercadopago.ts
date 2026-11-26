@@ -78,9 +78,19 @@ mercadopagoRouter.post('/pix', requireAuth, async (req, res) => {
     }
 
     const txData = data.point_of_interaction?.transaction_data ?? {};
+    const paymentId = String(data.id);
+    const status = String(data.status || 'pending');
+
+    await pool.query(
+      `INSERT INTO mp_pix_pagamentos (payment_id, status, status_detail, transaction_amount)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (payment_id) DO UPDATE SET status = EXCLUDED.status, updated_at = NOW()`,
+      [paymentId, status, String(data.status_detail || ''), Number(numericAmount.toFixed(2))]
+    );
+
     res.json({
-      paymentId: String(data.id),
-      status: String(data.status || 'pending'),
+      paymentId,
+      status,
       qrCode: txData.qr_code || '',
       qrCodeBase64: txData.qr_code_base64 || '',
       ticketUrl: txData.ticket_url || '',
@@ -91,12 +101,31 @@ mercadopagoRouter.post('/pix', requireAuth, async (req, res) => {
   }
 });
 
-// Consulta status do pagamento PIX no Mercado Pago
+// Consulta status do pagamento PIX (prioriza atualização recebida via Webhook e confirma na API MP)
 mercadopagoRouter.get('/pix/:paymentId', requireAuth, async (req, res) => {
   try {
     const { paymentId } = req.params;
     if (!/^\d+$/.test(paymentId)) {
       res.status(400).json({ error: 'ID de pagamento inválido.' });
+      return;
+    }
+
+    const cached = await pool.query<{
+      payment_id: string;
+      status: string;
+      status_detail: string | null;
+      transaction_amount: string;
+      date_approved: string | null;
+    }>('SELECT * FROM mp_pix_pagamentos WHERE payment_id = $1', [paymentId]);
+
+    if (cached.rows[0]?.status === 'approved') {
+      res.json({
+        paymentId,
+        status: 'approved',
+        statusDetail: cached.rows[0].status_detail || 'accredited',
+        transactionAmount: Number(cached.rows[0].transaction_amount || 0),
+        dateApproved: cached.rows[0].date_approved,
+      });
       return;
     }
 
@@ -119,15 +148,79 @@ mercadopagoRouter.get('/pix/:paymentId', requireAuth, async (req, res) => {
       return;
     }
 
+    const status = String(data.status || 'pending');
+    const statusDetail = String(data.status_detail || '');
+    const amount = Number(data.transaction_amount || 0);
+    const dateApproved = data.date_approved || null;
+
+    await pool.query(
+      `INSERT INTO mp_pix_pagamentos (payment_id, status, status_detail, transaction_amount, date_approved)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (payment_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         status_detail = EXCLUDED.status_detail,
+         date_approved = COALESCE(EXCLUDED.date_approved, mp_pix_pagamentos.date_approved),
+         updated_at = NOW()`,
+      [paymentId, status, statusDetail, amount, dateApproved]
+    );
+
     res.json({
       paymentId: String(data.id),
-      status: String(data.status || 'pending'),
-      statusDetail: String(data.status_detail || ''),
-      transactionAmount: Number(data.transaction_amount || 0),
-      dateApproved: data.date_approved || null,
+      status,
+      statusDetail,
+      transactionAmount: amount,
+      dateApproved,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Webhook público para receber notificações de pagamento do Mercado Pago Developers
+mercadopagoRouter.post('/webhook', async (req, res) => {
+  try {
+    const queryType = String(req.query.type || req.query.topic || '');
+    const bodyType = String(req.body?.type || req.body?.topic || '');
+    const eventType = queryType || bodyType;
+
+    const rawId =
+      req.body?.data?.id ??
+      req.query['data.id'] ??
+      req.query.id ??
+      (typeof req.body?.resource === 'string' ? req.body.resource.split('/').pop() : '');
+    const paymentId = String(rawId || '').trim();
+
+    if ((!eventType || eventType === 'payment') && /^\d+$/.test(paymentId)) {
+      const mp = await getMpConfig();
+      if (mp.accessToken) {
+        const mpRes = await fetch(`${MP_API_BASE}/v1/payments/${paymentId}`, {
+          headers: { Authorization: `Bearer ${mp.accessToken}` },
+        });
+        const data = (await mpRes.json().catch(() => null)) as Record<string, any> | null;
+        if (mpRes.ok && data?.id) {
+          await pool.query(
+            `INSERT INTO mp_pix_pagamentos (payment_id, status, status_detail, transaction_amount, date_approved)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (payment_id) DO UPDATE SET
+               status = EXCLUDED.status,
+               status_detail = EXCLUDED.status_detail,
+               date_approved = COALESCE(EXCLUDED.date_approved, mp_pix_pagamentos.date_approved),
+               updated_at = NOW()`,
+            [
+              String(data.id),
+              String(data.status || 'pending'),
+              String(data.status_detail || ''),
+              Number(data.transaction_amount || 0),
+              data.date_approved || null,
+            ]
+          );
+        }
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch {
+    res.status(200).json({ received: true });
   }
 });
 
