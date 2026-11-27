@@ -166,7 +166,7 @@ export function UsersPage() {
                     <span>{u.name}</span>
                     {protectedUser && (
                       <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-primary-container font-label-sm font-bold">
-                        Principal
+                        Suporte
                       </span>
                     )}
                   </div>
