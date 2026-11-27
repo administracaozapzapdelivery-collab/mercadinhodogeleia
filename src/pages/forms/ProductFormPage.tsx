@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { formatBRL } from '../../data/mockData';
@@ -23,6 +23,15 @@ export function ProductFormPage() {
   const [minStock, setMinStock] = useState('10');
   const [expiryDate, setExpiryDate] = useState('2027-06-30');
   const [adminOnly, setAdminOnly] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [nameError, setNameError] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     if (!id) return;
@@ -52,9 +61,19 @@ export function ProductFormPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName || /^\d+$/.test(trimmedName)) {
+      setNameError(true);
+      setToast(
+        'O nome do produto não pode conter apenas números (use o campo de código de barras para códigos numéricos).'
+      );
+      nameInputRef.current?.focus();
+      return;
+    }
+    setNameError(false);
     const payload = {
       barcode: barcode.trim(),
-      name: name.trim(),
+      name: trimmedName,
       category,
       unit,
       costPrice: cost,
@@ -64,21 +83,42 @@ export function ProductFormPage() {
       expiryDate: expiryDate || undefined,
       adminOnly,
     };
-    if (isEdit && id) {
-      await updateProduct(id, payload);
-    } else {
-      await addProduct({
-        id: String(Date.now()),
-        sku: `PRD-${Math.floor(100 + Math.random() * 900)}`,
-        ...payload,
-        abcClass: 'B',
-      });
+    try {
+      if (isEdit && id) {
+        await updateProduct(id, payload);
+      } else {
+        await addProduct({
+          id: String(Date.now()),
+          sku: `PRD-${Math.floor(100 + Math.random() * 900)}`,
+          ...payload,
+          abcClass: 'B',
+        });
+      }
+      navigate('/produtos');
+    } catch (err) {
+      setToast((err as Error).message || 'Não foi possível salvar o produto.');
     }
-    navigate('/produtos');
   }
 
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-space-lg">
+      {toast && (
+        <div
+          role="alert"
+          className="fixed top-5 right-5 z-[80] max-w-md w-[calc(100%-2.5rem)] sm:w-auto flex items-center gap-3 px-4 py-3.5 rounded-xl bg-error text-white shadow-2xl border border-white/20"
+        >
+          <span className="material-symbols-outlined text-[22px] shrink-0">warning</span>
+          <span className="font-label-md font-bold flex-1">{toast}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="p-1 rounded-lg hover:bg-white/20 transition-colors shrink-0"
+            aria-label="Fechar aviso"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+      )}
       <FormPageHeader
         backLabel="Voltar para Produtos"
         backTo="/produtos"
@@ -163,13 +203,19 @@ export function ProductFormPage() {
                 Nome Completo do Produto <span className="text-error">*</span>
               </label>
               <input
+                ref={nameInputRef}
                 id="prod-name"
                 required
                 maxLength={80}
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (nameError) setNameError(false);
+                }}
                 placeholder="Ex: Arroz Tipo 1 Camil 5kg"
-                className="w-full h-11 px-3 rounded-lg border border-slate-200"
+                className={`w-full h-11 px-3 rounded-lg border ${
+                  nameError ? 'border-error ring-2 ring-error/20' : 'border-slate-200'
+                }`}
               />
             </div>
 

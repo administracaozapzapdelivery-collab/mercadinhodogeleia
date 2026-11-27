@@ -60,6 +60,27 @@ export async function initDatabase() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS comandas (
+      id SERIAL PRIMARY KEY,
+      identificador VARCHAR(80) NOT NULL,
+      observacao VARCHAR(200),
+      status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
+      usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      venda_id INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS comanda_itens (
+      id SERIAL PRIMARY KEY,
+      comanda_id INTEGER NOT NULL REFERENCES comandas(id) ON DELETE CASCADE,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+      quantidade NUMERIC(10,3) NOT NULL DEFAULT 1,
+      preco_unitario NUMERIC(10,2) NOT NULL DEFAULT 0.00
+    )
+  `);
+  await pool.query(`
     INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
     SELECT 'Venda no Balcão', '', 0.00, 0.00, 'EM_DIA'
     WHERE NOT EXISTS (

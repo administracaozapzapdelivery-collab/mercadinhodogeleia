@@ -474,3 +474,211 @@ salesAndPdvRouter.post('/sales/:id/cancel', requireAuth, pinRateLimiter, async (
     client.release();
   }
 });
+
+// Comandas / Pedidos em Aberto (Espetinhos, Jantinha e consumo no local)
+salesAndPdvRouter.get('/comandas', requireAuth, async (_req, res) => {
+  try {
+    const comandasRes = await pool.query<{
+      id: number;
+      identificador: string;
+      observacao: string | null;
+      created_at: string;
+      updated_at: string;
+      operador: string | null;
+    }>(
+      `SELECT c.id, c.identificador, c.observacao,
+              TO_CHAR(c.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS created_at,
+              TO_CHAR(c.updated_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS updated_at,
+              u.nome AS operador
+       FROM comandas c
+       LEFT JOIN usuarios u ON u.id = c.usuario_id
+       WHERE c.status = 'ABERTA'
+       ORDER BY c.updated_at DESC, c.id DESC`
+    );
+
+    if (comandasRes.rows.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const ids = comandasRes.rows.map((r) => r.id);
+    const itensRes = await pool.query<{
+      comanda_id: number;
+      produto_id: number;
+      product_name: string;
+      unit: string;
+      quantidade: string;
+      preco_unitario: string;
+    }>(
+      `SELECT ci.comanda_id, ci.produto_id, p.nome AS product_name,
+              LOWER(p.unidade_medida::text) AS unit,
+              ci.quantidade, ci.preco_unitario
+       FROM comanda_itens ci
+       JOIN produtos p ON p.id = ci.produto_id
+       WHERE ci.comanda_id = ANY($1::int[])
+       ORDER BY ci.id ASC`,
+      [ids]
+    );
+
+    const itemsByComanda = new Map<number, Array<{
+      productId: string;
+      productName: string;
+      unit: string;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+    }>>();
+
+    for (const row of itensRes.rows) {
+      const qty = Number(row.quantidade);
+      const price = Number(row.preco_unitario);
+      const list = itemsByComanda.get(row.comanda_id) ?? [];
+      list.push({
+        productId: String(row.produto_id),
+        productName: row.product_name,
+        unit: row.unit === 'lt' ? 'L' : row.unit,
+        quantity: qty,
+        unitPrice: price,
+        subtotal: qty * price,
+      });
+      itemsByComanda.set(row.comanda_id, list);
+    }
+
+    res.json(
+      comandasRes.rows.map((c) => {
+        const items = itemsByComanda.get(c.id) ?? [];
+        const total = items.reduce((acc, it) => acc + it.subtotal, 0);
+        return {
+          id: String(c.id),
+          identificador: c.identificador,
+          observacao: c.observacao ?? '',
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+          operator: c.operador ?? 'Operador',
+          items,
+          total,
+        };
+      })
+    );
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+salesAndPdvRouter.post('/comandas', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { identificador, observacao, items } = req.body as {
+      identificador: string;
+      observacao?: string;
+      items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    };
+    const label = String(identificador ?? '').trim();
+    if (!label) {
+      res.status(400).json({ error: 'Informe a identificação da comanda (ex: Mesa 01 ou Nome).' });
+      return;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Adicione pelo menos um item para abrir a comanda.' });
+      return;
+    }
+
+    await client.query('BEGIN');
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO comandas (identificador, observacao, status, usuario_id)
+       VALUES ($1, $2, 'ABERTA', $3) RETURNING id`,
+      [label, observacao?.trim() || null, req.user!.id]
+    );
+    const comandaId = inserted.rows[0].id;
+
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO comanda_itens (comanda_id, produto_id, quantidade, preco_unitario)
+         VALUES ($1, $2, $3, $4)`,
+        [comandaId, Number(item.productId), Number(item.quantity), Number(item.unitPrice)]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ id: String(comandaId), ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
+
+salesAndPdvRouter.put('/comandas/:id', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de comanda inválido.' });
+      return;
+    }
+    const { items, observacao } = req.body as {
+      observacao?: string;
+      items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    };
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'A comanda precisa ter ao menos um item.' });
+      return;
+    }
+
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE comandas SET observacao = COALESCE($1, observacao), updated_at = NOW()
+       WHERE id = $2 AND status = 'ABERTA'`,
+      [observacao?.trim() || null, id]
+    );
+    await client.query('DELETE FROM comanda_itens WHERE comanda_id = $1', [id]);
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO comanda_itens (comanda_id, produto_id, quantidade, preco_unitario)
+         VALUES ($1, $2, $3, $4)`,
+        [id, Number(item.productId), Number(item.quantity), Number(item.unitPrice)]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
+
+salesAndPdvRouter.post('/comandas/:id/close', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de comanda inválido.' });
+      return;
+    }
+    const { vendaId } = req.body as { vendaId?: string | number };
+    await pool.query(
+      `UPDATE comandas SET status = 'FECHADA', venda_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [vendaId ? Number(vendaId) : null, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+salesAndPdvRouter.delete('/comandas/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: 'ID de comanda inválido.' });
+      return;
+    }
+    await pool.query(`DELETE FROM comandas WHERE id = $1 AND status = 'ABERTA'`, [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});

@@ -13,6 +13,26 @@ interface CartItem {
   quantity: number;
 }
 
+interface ComandaItem {
+  productId: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+interface OpenComanda {
+  id: string;
+  identificador: string;
+  observacao: string;
+  createdAt: string;
+  updatedAt: string;
+  operator: string;
+  items: ComandaItem[];
+  total: number;
+}
+
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
   { id: 'PIX', label: 'PIX', icon: 'qr_code_2' },
   { id: 'Débito', label: 'Débito', icon: 'credit_card' },
@@ -74,6 +94,30 @@ export function PdvPage() {
     qrCodeBase64: string;
     amount: number;
   } | null>(null);
+
+  const [comandas, setComandas] = useState<OpenComanda[]>([]);
+  const [comandasModalOpen, setComandasModalOpen] = useState(false);
+  const [activeComanda, setActiveComanda] = useState<{ id: string; identificador: string } | null>(null);
+  const [newComandaLabel, setNewComandaLabel] = useState('');
+  const [newComandaNote, setNewComandaNote] = useState('');
+  const [savingComanda, setSavingComanda] = useState(false);
+  const [comandaError, setComandaError] = useState<string | null>(null);
+
+  const loadComandas = useCallback(async () => {
+    try {
+      const res = await fetch('/api/comandas');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setComandas(data);
+      }
+    } catch {
+      // ignora erro pontual de rede
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadComandas();
+  }, [loadComandas]);
 
   const todayBr = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const openShift = shifts.find((s) => s.status === 'Aberto' && s.openedAt?.startsWith(todayBr));
@@ -279,6 +323,16 @@ export function PdvPage() {
         );
       }
 
+      if (activeComanda) {
+        await fetch(`/api/comandas/${activeComanda.id}/close`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendaId: body.id }),
+        }).catch(() => null);
+        setActiveComanda(null);
+        void loadComandas();
+      }
+
       await refreshData();
       const receiptPayload: ReceiptData = {
         cupom: cupomNum,
@@ -347,7 +401,119 @@ export function PdvPage() {
     total,
     cashVal,
     changeDue,
+    activeComanda,
+    loadComandas,
   ]);
+
+  async function handleSaveNewComanda(e: React.FormEvent) {
+    e.preventDefault();
+    if (cart.length === 0 || savingComanda) return;
+    const label = newComandaLabel.trim();
+    if (!label) {
+      setComandaError('Informe o nome ou mesa da comanda.');
+      return;
+    }
+    setSavingComanda(true);
+    setComandaError(null);
+    try {
+      const res = await fetch('/api/comandas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identificador: label,
+          observacao: newComandaNote.trim(),
+          items: cart.map((i) => ({
+            productId: i.product.id,
+            quantity: i.quantity,
+            unitPrice: i.product.salePrice,
+          })),
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setComandaError(body?.error ?? 'Erro ao salvar comanda.');
+        return;
+      }
+      await loadComandas();
+      setCart([]);
+      setDiscount('0');
+      setLastScanned(null);
+      setNewComandaLabel('');
+      setNewComandaNote('');
+      setComandasModalOpen(false);
+      setFeedback({ type: 'ok', text: `Comanda "${label}" salva e aberta!` });
+      scannerRef.current?.focus();
+    } finally {
+      setSavingComanda(false);
+    }
+  }
+
+  async function handleUpdateActiveComanda() {
+    if (!activeComanda || cart.length === 0 || savingComanda) return;
+    setSavingComanda(true);
+    try {
+      const res = await fetch(`/api/comandas/${activeComanda.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cart.map((i) => ({
+            productId: i.product.id,
+            quantity: i.quantity,
+            unitPrice: i.product.salePrice,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setFeedback({ type: 'err', text: body?.error ?? 'Erro ao atualizar comanda.' });
+        return;
+      }
+      const label = activeComanda.identificador;
+      await loadComandas();
+      setCart([]);
+      setDiscount('0');
+      setLastScanned(null);
+      setActiveComanda(null);
+      setFeedback({ type: 'ok', text: `Comanda "${label}" atualizada!` });
+      scannerRef.current?.focus();
+    } finally {
+      setSavingComanda(false);
+    }
+  }
+
+  function handleLoadComanda(c: OpenComanda) {
+    const loadedCart: CartItem[] = c.items.map((it) => {
+      const found = products.find((p) => p.id === it.productId);
+      const product: Product = found ?? {
+        id: it.productId,
+        sku: '',
+        barcode: '',
+        name: it.productName,
+        category: 'Espetinhos e Jantinha',
+        unit: (it.unit as Product['unit']) || 'un',
+        costPrice: 0,
+        salePrice: it.unitPrice,
+        stock: 999,
+        minStock: 0,
+        abcClass: 'A',
+      };
+      return { product, quantity: it.quantity };
+    });
+    setCart(loadedCart);
+    setActiveComanda({ id: c.id, identificador: c.identificador });
+    setDiscount('0');
+    setFeedback(null);
+    setComandasModalOpen(false);
+    scannerRef.current?.focus();
+  }
+
+  async function handleDeleteComanda(id: string) {
+    await fetch(`/api/comandas/${id}`, { method: 'DELETE' });
+    if (activeComanda?.id === id) {
+      setActiveComanda(null);
+    }
+    await loadComandas();
+  }
 
   async function handleStartPixPayment() {
     if (cart.length === 0 || pixGenerating || submitting) return;
@@ -500,6 +666,19 @@ export function PdvPage() {
             <span>F8 Limpar</span>
           </div>
 
+          <button
+            type="button"
+            onClick={() => {
+              setComandaError(null);
+              void loadComandas();
+              setComandasModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">receipt_long</span>
+            <span>Comandas ({comandas.length})</span>
+          </button>
+
           {openShift ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#A9F04D] text-[#0F172A] font-label-sm font-extrabold uppercase">
               <span className="w-2 h-2 rounded-full bg-[#0F172A]" />
@@ -647,6 +826,25 @@ export function PdvPage() {
 
           {/* Lista de Itens do Cupom */}
           <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+            {activeComanda && (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="material-symbols-outlined text-amber-700 text-[18px]">
+                    restaurant
+                  </span>
+                  <span className="font-label-md font-bold text-amber-900 truncate">
+                    Comanda: {activeComanda.identificador}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveComanda(null)}
+                  className="px-2 py-1 rounded bg-white border border-amber-200 text-amber-900 font-label-sm font-bold hover:bg-amber-100 shrink-0"
+                >
+                  Desvincular
+                </button>
+              </div>
+            )}
             {feedback?.type === 'ok' && (
               <div className="p-3.5 rounded-xl border font-label-md font-bold flex items-center justify-between gap-2 bg-tertiary-fixed/40 border-tertiary-fixed-dim text-tertiary">
                 <span>{feedback.text}</span>
@@ -776,6 +974,32 @@ export function PdvPage() {
                 {submitting ? 'Processando...' : 'Finalizar Venda — F4'}
               </span>
             </button>
+
+            {cart.length > 0 && (
+              <button
+                type="button"
+                disabled={savingComanda}
+                onClick={() => {
+                  if (activeComanda) {
+                    void handleUpdateActiveComanda();
+                  } else {
+                    setComandaError(null);
+                    void loadComandas();
+                    setComandasModalOpen(true);
+                  }
+                }}
+                className="w-full py-2.5 rounded-xl bg-amber-100 hover:bg-amber-200 disabled:opacity-50 text-amber-950 border border-amber-300 font-label-lg font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">receipt_long</span>
+                <span>
+                  {activeComanda
+                    ? savingComanda
+                      ? 'Salvando Comanda...'
+                      : `Atualizar Comanda (${activeComanda.identificador})`
+                    : 'Salvar em Comanda (Mesa / Cliente)'}
+                </span>
+              </button>
+            )}
           </div>
         </section>
       </div>
@@ -1555,6 +1779,115 @@ export function PdvPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal de Comandas em Aberto (Espetinhos, Jantinha e consumo no local) */}
+      <Modal
+        open={comandasModalOpen}
+        title={`Comandas em Aberto (${comandas.length})`}
+        onClose={() => {
+          setComandasModalOpen(false);
+          setComandaError(null);
+        }}
+      >
+        <div className="space-y-4">
+          {cart.length > 0 && !activeComanda && (
+            <form
+              onSubmit={handleSaveNewComanda}
+              className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 space-y-2.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-label-md font-bold text-amber-950">
+                  Abrir nova comanda com os {itemsCount} {itemsCount === 1 ? 'item' : 'itens'} do caixa ({formatBRL(total)})
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  required
+                  value={newComandaLabel}
+                  onChange={(e) => setNewComandaLabel(e.target.value)}
+                  placeholder="Ex: Mesa 02, João, Espetinho..."
+                  className="h-10 px-3 rounded-lg border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                <input
+                  type="text"
+                  value={newComandaNote}
+                  onChange={(e) => setNewComandaNote(e.target.value)}
+                  placeholder="Observação (opcional)"
+                  className="h-10 px-3 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+              </div>
+              {comandaError && (
+                <p className="font-label-sm font-bold text-error">{comandaError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={savingComanda}
+                className="w-full py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 font-label-md font-extrabold"
+              >
+                {savingComanda ? 'Salvando...' : 'Abrir Comanda e Liberar Caixa'}
+              </button>
+            </form>
+          )}
+
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {comandas.length === 0 ? (
+              <div className="py-8 text-center text-on-surface-variant">
+                <span className="material-symbols-outlined text-[34px] text-outline-variant mb-1 block">
+                  receipt_long
+                </span>
+                <p className="font-label-md font-bold">Nenhuma comanda aberta no momento</p>
+                <p className="font-body-sm mt-0.5">
+                  Lance os itens no caixa e clique em "Salvar em Comanda".
+                </p>
+              </div>
+            ) : (
+              comandas.map((c) => (
+                <div
+                  key={c.id}
+                  className="p-3 rounded-xl border border-slate-200 bg-surface-container-low/60 flex flex-col gap-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-label-lg font-bold text-primary">
+                        {c.identificador}
+                      </p>
+                      <p className="font-body-sm text-on-surface-variant">
+                        {c.items.length} {c.items.length === 1 ? 'item' : 'itens'} • Aberta às {c.createdAt}
+                        {c.observacao ? ` • ${c.observacao}` : ''}
+                      </p>
+                    </div>
+                    <span className="font-headline-sm font-extrabold text-primary tabular-nums">
+                      {formatBRL(c.total)}
+                    </span>
+                  </div>
+
+                  <p className="font-body-sm text-on-surface-variant truncate">
+                    {c.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
+                  </p>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteComanda(c.id)}
+                      className="px-3 py-1.5 rounded-lg text-error bg-error-container/50 hover:bg-error-container font-label-sm font-bold"
+                    >
+                      Cancelar Comanda
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLoadComanda(c)}
+                      className="px-3.5 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-sm font-extrabold"
+                    >
+                      Abrir no Caixa / Adicionar ou Fechar
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </Modal>
 
       {lastReceipt && (

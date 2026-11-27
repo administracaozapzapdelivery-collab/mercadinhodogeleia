@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { jsPDF } from 'jspdf';
 import { useErp } from '../context/ErpContext';
 import { formatBRL } from '../data/mockData';
 import type { Product } from '../types/erp';
@@ -35,13 +36,18 @@ const FILTER_LABELS: Record<Exclude<ProductQuickFilter, 'all'>, string> = {
 
 export function ProductsPage() {
   const navigate = useNavigate();
-  const { products, categories, deleteProduct } = useErp();
+  const { products, categories, suppliers, deleteProduct } = useErp();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [sortBy, setSortBy] = useState<ProductSort>('name');
   const [quickFilter, setQuickFilter] = useState<ProductQuickFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [alertDays, setAlertDays] = useState(15);
+  const [restockOpen, setRestockOpen] = useState(false);
+  const [restockSelected, setRestockSelected] = useState<Record<string, boolean>>({});
+  const [restockQtys, setRestockQtys] = useState<Record<string, number>>({});
+  const [restockSupplierId, setRestockSupplierId] = useState('');
+  const [restockCopied, setRestockCopied] = useState(false);
   const [viewItem, setViewItem] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
@@ -167,6 +173,141 @@ export function ProductsPage() {
     [filtered, startIndex]
   );
 
+  const lowStockList = useMemo(
+    () =>
+      products
+        .filter((p) => p.stock <= p.minStock)
+        .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)),
+    [products]
+  );
+
+  function openRestockModal() {
+    const selectedMap: Record<string, boolean> = {};
+    const qtyMap: Record<string, number> = {};
+    for (const p of lowStockList) {
+      selectedMap[p.id] = true;
+      qtyMap[p.id] = Math.max(1, p.minStock * 2 - Math.max(0, p.stock));
+    }
+    setRestockSelected(selectedMap);
+    setRestockQtys(qtyMap);
+    setRestockCopied(false);
+    setRestockOpen(true);
+  }
+
+  const chosenRestockItems = useMemo(
+    () =>
+      lowStockList
+        .filter((p) => restockSelected[p.id])
+        .map((p) => ({
+          product: p,
+          qty: Math.max(1, Number(restockQtys[p.id]) || 1),
+        })),
+    [lowStockList, restockSelected, restockQtys]
+  );
+
+  const restockEstimatedTotal = useMemo(
+    () =>
+      chosenRestockItems.reduce((acc, item) => acc + item.product.costPrice * item.qty, 0),
+    [chosenRestockItems]
+  );
+
+  function buildWhatsAppMessage(): string {
+    const supplier = suppliers.find((s) => s.id === restockSupplierId);
+    const todayStr = new Date().toLocaleDateString('pt-BR');
+    const lines = [
+      `*Lista de Reposição — Mercadinho do Geleia* (${todayStr})`,
+      supplier ? `Fornecedor: *${supplier.name}*` : '',
+      '',
+    ].filter(Boolean);
+
+    const byCategory = new Map<string, typeof chosenRestockItems>();
+    for (const item of chosenRestockItems) {
+      const list = byCategory.get(item.product.category) ?? [];
+      list.push(item);
+      byCategory.set(item.product.category, list);
+    }
+
+    for (const [cat, items] of byCategory.entries()) {
+      lines.push(`*${cat}*`);
+      for (const { product, qty } of items) {
+        lines.push(`• ${product.name} — *${qty} ${product.unit}*`);
+      }
+      lines.push('');
+    }
+
+    lines.push(`Total de itens: ${chosenRestockItems.length}`);
+    return lines.join('\n');
+  }
+
+  async function handleCopyRestock() {
+    if (chosenRestockItems.length === 0) return;
+    await navigator.clipboard.writeText(buildWhatsAppMessage());
+    setRestockCopied(true);
+    setTimeout(() => setRestockCopied(false), 3000);
+  }
+
+  function handleSendWhatsAppRestock() {
+    if (chosenRestockItems.length === 0) return;
+    const supplier = suppliers.find((s) => s.id === restockSupplierId);
+    const digits = (supplier?.phone ?? '').replace(/\D/g, '');
+    const phonePart = digits.length >= 10 ? `55${digits}` : '';
+    const text = encodeURIComponent(buildWhatsAppMessage());
+    window.open(`https://wa.me/${phonePart}?text=${text}`, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleExportRestockPdf() {
+    if (chosenRestockItems.length === 0) return;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const supplier = suppliers.find((s) => s.id === restockSupplierId);
+    const todayStr = new Date().toLocaleDateString('pt-BR');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('Mercadinho do Geleia — Lista de Reposição', 14, 18);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Data: ${todayStr} • Itens selecionados: ${chosenRestockItems.length}`, 14, 25);
+    if (supplier) {
+      doc.text(`Fornecedor: ${supplier.name} (${supplier.phone || 'Sem telefone'})`, 14, 30);
+    }
+
+    let y = supplier ? 38 : 33;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Produto', 14, y);
+    doc.text('Categoria', 100, y);
+    doc.text('Atual/Mín', 138, y);
+    doc.text('Comprar', 164, y);
+    doc.text('Custo Est.', 184, y);
+    y += 2;
+    doc.line(14, y, 196, y);
+    y += 5;
+
+    doc.setFont('helvetica', 'normal');
+    for (const { product, qty } of chosenRestockItems) {
+      if (y > 275) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(product.name.slice(0, 44), 14, y);
+      doc.text(product.category.slice(0, 18), 100, y);
+      doc.text(`${product.stock}/${product.minStock} ${product.unit}`, 138, y);
+      doc.text(`${qty} ${product.unit}`, 164, y);
+      doc.text(formatBRL(product.costPrice * qty), 184, y);
+      y += 6;
+    }
+
+    y += 3;
+    doc.line(14, y, 196, y);
+    y += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(`Custo Estimado Total: ${formatBRL(restockEstimatedTotal)}`, 14, y);
+
+    doc.save(`lista-reposicao-${toLocalISODate(new Date())}.pdf`);
+  }
+
   return (
     <div className="flex flex-col gap-space-lg">
       <PageHeader
@@ -174,7 +315,15 @@ export function ProductsPage() {
         title="Produtos e Estoque"
         subtitle="Gerencie preços de venda, margem, estoque mínimo e código de barras."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={openRestockModal}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 font-label-lg font-bold shadow-sm"
+            >
+              <span className="material-symbols-outlined text-[20px]">fact_check</span>
+              <span>Gerar Lista de Reposição ({stats.lowStockCount})</span>
+            </button>
             <button
               type="button"
               onClick={() => navigate('/etiquetas')}
@@ -639,6 +788,146 @@ export function ProductsPage() {
                 <p className="font-label-sm text-on-surface-variant">Validade</p>
                 <p className="font-bold text-on-surface">{viewItem.expiryDate || 'Não informada'}</p>
               </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={restockOpen}
+        title={`Lista de Reposição — Estoque Baixo (${lowStockList.length})`}
+        onClose={() => setRestockOpen(false)}
+      >
+        {lowStockList.length === 0 ? (
+          <div className="py-6 text-center text-on-surface-variant">
+            <span className="material-symbols-outlined text-[36px] text-tertiary mb-2 block">
+              check_circle
+            </span>
+            <p className="font-label-lg font-bold text-on-surface">Estoque em dia!</p>
+            <p className="font-body-sm mt-1">Nenhum produto está abaixo ou igual ao estoque mínimo.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <select
+                value={restockSupplierId}
+                onChange={(e) => setRestockSupplierId(e.target.value)}
+                aria-label="Selecionar fornecedor"
+                className="flex-1 h-9 px-3 rounded-lg border border-slate-200 bg-white font-body-sm"
+              >
+                <option value="">Fornecedor opcional (para WhatsApp / PDF)</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.phone ? `• ${s.phone}` : ''}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-2 text-body-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    const allSelected = chosenRestockItems.length === lowStockList.length;
+                    for (const p of lowStockList) next[p.id] = !allSelected;
+                    setRestockSelected(next);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high font-label-sm font-bold text-primary"
+                >
+                  {chosenRestockItems.length === lowStockList.length
+                    ? 'Desmarcar todos'
+                    : 'Marcar todos'}
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto divide-y divide-surface-container border border-slate-200 rounded-xl">
+              {lowStockList.map((p) => {
+                const checked = Boolean(restockSelected[p.id]);
+                const qty = restockQtys[p.id] ?? 1;
+                return (
+                  <div
+                    key={p.id}
+                    className={`flex items-center justify-between gap-2 p-2.5 text-body-sm ${
+                      checked ? 'bg-white' : 'bg-surface-container-low/50 opacity-60'
+                    }`}
+                  >
+                    <label className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setRestockSelected((prev) => ({ ...prev, [p.id]: e.target.checked }))
+                        }
+                        className="w-4 h-4 rounded"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-label-md font-bold text-on-surface truncate">{p.name}</p>
+                        <p className="text-xs text-on-surface-variant">
+                          {p.category} • Atual: {p.stock} / Mín: {p.minStock} {p.unit}
+                        </p>
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <input
+                        type="number"
+                        min={1}
+                        value={qty}
+                        disabled={!checked}
+                        onChange={(e) =>
+                          setRestockQtys((prev) => ({
+                            ...prev,
+                            [p.id]: Math.max(1, Number(e.target.value) || 1),
+                          }))
+                        }
+                        aria-label={`Quantidade a comprar de ${p.name}`}
+                        className="w-16 h-8 px-2 rounded-lg border border-slate-200 text-right font-bold tabular-nums"
+                      />
+                      <span className="text-xs text-on-surface-variant w-6">{p.unit}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-3 rounded-xl bg-surface-container-low flex items-center justify-between">
+              <span className="font-body-sm text-on-surface-variant">
+                {chosenRestockItems.length} {chosenRestockItems.length === 1 ? 'item selecionado' : 'itens selecionados'}
+              </span>
+              <span className="font-label-lg font-extrabold text-primary tabular-nums">
+                Custo est.: {formatBRL(restockEstimatedTotal)}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={chosenRestockItems.length === 0}
+                onClick={() => void handleCopyRestock()}
+                className="px-3.5 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high disabled:opacity-40 text-primary font-label-md font-bold flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {restockCopied ? 'check' : 'content_copy'}
+                </span>
+                <span>{restockCopied ? 'Copiado!' : 'Copiar Lista'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={chosenRestockItems.length === 0}
+                onClick={handleSendWhatsAppRestock}
+                className="px-3.5 py-2 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] disabled:opacity-40 text-[#0F172A] font-label-md font-extrabold flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[18px]">chat</span>
+                <span>Enviar WhatsApp</span>
+              </button>
+              <button
+                type="button"
+                disabled={chosenRestockItems.length === 0}
+                onClick={handleExportRestockPdf}
+                className="px-3.5 py-2 rounded-lg bg-primary text-white hover:opacity-90 disabled:opacity-40 font-label-md font-bold flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+                <span>Exportar PDF</span>
+              </button>
             </div>
           </div>
         )}

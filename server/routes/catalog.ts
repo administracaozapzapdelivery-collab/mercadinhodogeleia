@@ -77,9 +77,19 @@ catalogRouter.get('/products/expiring', requireAuth, async (_req, res) => {
   }
 });
 
+function isNumericOnlyProductName(value: unknown): boolean {
+  return typeof value === 'string' && /^\d+$/.test(value.trim());
+}
+
 catalogRouter.post('/products', requireAuth, requireRole('ADMIN', 'GERENTE'), async (req, res) => {
   try {
     const { sku, barcode, name, category, unit, costPrice, salePrice, stock, minStock, expiryDate, photoUrl, adminOnly } = req.body;
+    if (!String(name ?? '').trim() || isNumericOnlyProductName(name)) {
+      res.status(400).json({
+        error: 'O nome do produto não pode conter apenas números. Informe uma descrição válida.',
+      });
+      return;
+    }
     const catRes = await pool.query<{ id: number }>('SELECT id FROM categorias WHERE nome = $1 LIMIT 1', [category]);
     const catId = catRes.rows[0]?.id ?? 1;
     const unitDb = unit === 'kg' ? 'KG' : unit === 'L' ? 'LT' : unit === 'cx' ? 'CX' : 'UN';
@@ -103,6 +113,12 @@ catalogRouter.put('/products/:id', requireAuth, requireRole('ADMIN', 'GERENTE'),
       return;
     }
     const { name, barcode, category, unit, salePrice, costPrice, minStock, stock, expiryDate, adminOnly } = req.body;
+    if (name !== undefined && (!String(name).trim() || isNumericOnlyProductName(name))) {
+      res.status(400).json({
+        error: 'O nome do produto não pode conter apenas números. Informe uma descrição válida.',
+      });
+      return;
+    }
     let catId: number | null = null;
     if (category) {
       const catRes = await pool.query<{ id: number }>('SELECT id FROM categorias WHERE nome = $1 LIMIT 1', [category]);
