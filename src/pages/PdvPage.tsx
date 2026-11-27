@@ -102,6 +102,8 @@ export function PdvPage() {
   const [newComandaNote, setNewComandaNote] = useState('');
   const [savingComanda, setSavingComanda] = useState(false);
   const [comandaError, setComandaError] = useState<string | null>(null);
+  const [priceCheckOpen, setPriceCheckOpen] = useState(false);
+  const [priceCheckQuery, setPriceCheckQuery] = useState('');
 
   const loadComandas = useCallback(async () => {
     try {
@@ -611,6 +613,10 @@ export function PdvPage() {
         setCart([]);
         setLastScanned(null);
         setFeedback(null);
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        setPriceCheckQuery('');
+        setPriceCheckOpen(true);
       }
     }
     window.addEventListener('keydown', onKeyDown);
@@ -664,7 +670,21 @@ export function PdvPage() {
             <span>F4 Finalizar</span>
             <span>•</span>
             <span>F8 Limpar</span>
+            <span>•</span>
+            <span>F9 Preço</span>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setPriceCheckQuery('');
+              setPriceCheckOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-extrabold uppercase transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">price_check</span>
+            <span>Consultar Preço</span>
+          </button>
 
           <button
             type="button"
@@ -785,19 +805,92 @@ export function PdvPage() {
             )}
           </div>
 
-          {/* Identidade da Loja no PDV */}
-          <div className="flex-1 min-h-0 flex items-center justify-center bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm p-8">
-            <div className="text-center flex flex-col items-center">
-              <div className="w-24 h-24 rounded-2xl bg-primary-container text-white flex flex-col items-center justify-center shadow-lg mb-5 ring-4 ring-tertiary-fixed/60">
-                <span className="material-symbols-outlined text-[42px] text-tertiary-fixed">
-                  storefront
+          {/* Busca por Nome / Identidade da Loja no PDV */}
+          {query.trim() ? (
+            <div className="flex-1 min-h-0 bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-surface-container bg-surface-container-low flex items-center justify-between">
+                <span className="font-label-md font-bold text-primary">
+                  Resultados para &ldquo;{query.trim()}&rdquo; ({filteredProducts.length})
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery('');
+                    scannerRef.current?.focus();
+                  }}
+                  className="text-xs font-bold text-secondary hover:underline"
+                >
+                  Limpar busca
+                </button>
               </div>
-              <h2 className="font-headline-md text-2xl sm:text-3xl font-extrabold text-primary tracking-tight">
-                Mercadinho e Lanchonete do Geleia
-              </h2>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3">
+                {filteredProducts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center py-10 text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[40px] text-outline-variant mb-2">
+                      search_off
+                    </span>
+                    <p className="font-label-lg font-bold text-on-surface">
+                      Nenhum produto encontrado
+                    </p>
+                    <p className="font-body-sm mt-0.5">
+                      Verifique o nome, SKU ou código de barras digitado.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                    {filteredProducts.slice(0, 30).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          addToCart(p);
+                          setQuery('');
+                          scannerRef.current?.focus();
+                        }}
+                        className="text-left p-3 rounded-xl border border-slate-200 bg-surface-container-low/40 hover:bg-primary-fixed/30 hover:border-primary/40 transition-all flex flex-col justify-between gap-2"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-label-sm uppercase text-secondary font-bold truncate">
+                              {p.category}
+                            </span>
+                            <span className="font-label-sm text-on-surface-variant tabular-nums shrink-0">
+                              {p.stock} {p.unit}
+                            </span>
+                          </div>
+                          <p className="font-label-md font-bold text-on-surface mt-0.5 line-clamp-2">
+                            {p.name}
+                          </p>
+                          <p className="text-xs text-on-surface-variant mt-0.5 truncate">
+                            {p.barcode || p.sku}
+                          </p>
+                        </div>
+                        <div className="flex items-baseline justify-between pt-1.5 border-t border-surface-container">
+                          <span className="font-headline-sm font-extrabold text-primary tabular-nums">
+                            {formatBRL(p.salePrice)}
+                          </span>
+                          <span className="text-xs font-bold text-tertiary">+ Adicionar</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex-1 min-h-0 flex items-center justify-center bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm p-8">
+              <div className="text-center flex flex-col items-center">
+                <div className="w-24 h-24 rounded-2xl bg-primary-container text-white flex flex-col items-center justify-center shadow-lg mb-5 ring-4 ring-tertiary-fixed/60">
+                  <span className="material-symbols-outlined text-[42px] text-tertiary-fixed">
+                    storefront
+                  </span>
+                </div>
+                <h2 className="font-headline-md text-2xl sm:text-3xl font-extrabold text-primary tracking-tight">
+                  Mercadinho e Lanchonete do Geleia
+                </h2>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Coluna Direita (5 cols ~42%) — Cupom Fiscal & Checkout */}
@@ -1887,6 +1980,110 @@ export function PdvPage() {
               ))
             )}
           </div>
+        </div>
+      </Modal>
+
+      {/* Modal de Consulta Rápida de Preço (F9) */}
+      <Modal
+        open={priceCheckOpen}
+        title="Consultar Preço (F9)"
+        onClose={() => {
+          setPriceCheckOpen(false);
+          setPriceCheckQuery('');
+          scannerRef.current?.focus();
+        }}
+      >
+        <div className="space-y-4">
+          <div className="relative flex items-center">
+            <span className="material-symbols-outlined absolute left-3 text-secondary text-[22px]">
+              barcode_scanner
+            </span>
+            <input
+              type="text"
+              value={priceCheckQuery}
+              onChange={(e) => setPriceCheckQuery(e.target.value)}
+              placeholder="Bipe o código de barras ou digite o nome do produto..."
+              className="w-full h-12 pl-11 pr-4 rounded-xl border-2 border-secondary/40 focus:border-secondary focus:outline-none font-body-md"
+              autoFocus
+            />
+          </div>
+
+          {(() => {
+            const q = priceCheckQuery.trim().toLowerCase();
+            if (!q) {
+              return (
+                <div className="py-8 text-center text-on-surface-variant">
+                  <span className="material-symbols-outlined text-[38px] text-outline-variant mb-2 block">
+                    price_check
+                  </span>
+                  <p className="font-label-md font-bold text-on-surface">
+                    Pronto para consultar
+                  </p>
+                  <p className="font-body-sm mt-0.5">
+                    Bipe o código de barras ou digite o nome para visualizar o valor de venda.
+                  </p>
+                </div>
+              );
+            }
+            const matches = products.filter(
+              (p) =>
+                p.name.toLowerCase().includes(q) ||
+                p.barcode.toLowerCase().includes(q) ||
+                p.sku.toLowerCase().includes(q)
+            );
+            if (matches.length === 0) {
+              return (
+                <div className="py-8 text-center text-on-surface-variant">
+                  <span className="material-symbols-outlined text-[38px] text-outline-variant mb-2 block">
+                    search_off
+                  </span>
+                  <p className="font-label-md font-bold text-on-surface">
+                    Produto não encontrado
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {matches.slice(0, 15).map((p) => (
+                  <div
+                    key={p.id}
+                    className="p-3.5 rounded-xl border border-slate-200 bg-surface-container-low/60 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-label-lg font-bold text-on-surface truncate">
+                        {p.name}
+                      </p>
+                      <p className="font-body-sm text-on-surface-variant">
+                        {p.category} • {p.barcode || p.sku} • Estoque: {p.stock} {p.unit}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 flex items-center gap-3">
+                      <div>
+                        <span className="font-numeric-total text-2xl font-extrabold text-primary tabular-nums block">
+                          {formatBRL(p.salePrice)}
+                        </span>
+                        <span className="text-xs text-on-surface-variant">/ {p.unit}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          addToCart(p);
+                          setPriceCheckOpen(false);
+                          setPriceCheckQuery('');
+                          scannerRef.current?.focus();
+                        }}
+                        title="Adicionar ao caixa"
+                        className="px-3 py-2 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-sm font-extrabold"
+                      >
+                        + Caixa
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </Modal>
 
