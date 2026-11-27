@@ -65,12 +65,20 @@ export async function initDatabase() {
       identificador VARCHAR(80) NOT NULL,
       observacao VARCHAR(200),
       status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
+      cadastrada BOOLEAN NOT NULL DEFAULT FALSE,
+      ativo BOOLEAN NOT NULL DEFAULT TRUE,
       usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
       venda_id INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `);
+  await pool.query(
+    'ALTER TABLE comandas ADD COLUMN IF NOT EXISTS cadastrada BOOLEAN NOT NULL DEFAULT FALSE'
+  );
+  await pool.query(
+    'ALTER TABLE comandas ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE'
+  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS comanda_itens (
       id SERIAL PRIMARY KEY,

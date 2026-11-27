@@ -15,6 +15,7 @@ const LoginPage = lazyNamed(() => import('./pages/LoginPage'), 'LoginPage');
 const DashboardPage = lazyNamed(() => import('./pages/DashboardPage'), 'DashboardPage');
 const PdvPage = lazyNamed(() => import('./pages/PdvPage'), 'PdvPage');
 const SalesPage = lazyNamed(() => import('./pages/SalesPage'), 'SalesPage');
+const ComandasPage = lazyNamed(() => import('./pages/ComandasPage'), 'ComandasPage');
 const ProductsPage = lazyNamed(() => import('./pages/ProductsPage'), 'ProductsPage');
 const CategoriesPage = lazyNamed(() => import('./pages/CategoriesPage'), 'CategoriesPage');
 const MovementsPage = lazyNamed(() => import('./pages/MovementsPage'), 'MovementsPage');
@@ -57,6 +58,7 @@ export function App() {
             <Route element={<ErpLayout />}>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/vendas-e-cupons" element={<SalesPage />} />
+            <Route path="/comandas" element={<ComandasPage />} />
 
             <Route path="/produtos" element={<ProductsPage />} />
             <Route path="/produtos/novo" element={<ProductFormPage />} />

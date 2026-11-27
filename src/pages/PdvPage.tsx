@@ -26,6 +26,8 @@ interface OpenComanda {
   id: string;
   identificador: string;
   observacao: string;
+  status: 'LIVRE' | 'ABERTA';
+  cadastrada: boolean;
   createdAt: string;
   updatedAt: string;
   operator: string;
@@ -450,6 +452,39 @@ export function PdvPage() {
     }
   }
 
+  async function handleAssignToComanda(comandaId: string, label: string) {
+    if (cart.length === 0 || savingComanda) return;
+    setSavingComanda(true);
+    setComandaError(null);
+    try {
+      const res = await fetch(`/api/comandas/${comandaId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cart.map((i) => ({
+            productId: i.product.id,
+            quantity: i.quantity,
+            unitPrice: i.product.salePrice,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setComandaError(body?.error ?? 'Erro ao lançar na comanda.');
+        return;
+      }
+      await loadComandas();
+      setCart([]);
+      setDiscount('0');
+      setLastScanned(null);
+      setComandasModalOpen(false);
+      setFeedback({ type: 'ok', text: `Itens lançados na comanda "${label}"!` });
+      scannerRef.current?.focus();
+    } finally {
+      setSavingComanda(false);
+    }
+  }
+
   async function handleUpdateActiveComanda() {
     if (!activeComanda || cart.length === 0 || savingComanda) return;
     setSavingComanda(true);
@@ -696,7 +731,9 @@ export function PdvPage() {
             className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase transition-colors"
           >
             <span className="material-symbols-outlined text-[16px]">receipt_long</span>
-            <span>Comandas ({comandas.length})</span>
+            <span>
+              Comandas ({comandas.filter((c) => c.status === 'ABERTA').length}/{comandas.length})
+            </span>
           </button>
 
           {openShift ? (
@@ -1874,10 +1911,10 @@ export function PdvPage() {
         )}
       </Modal>
 
-      {/* Modal de Comandas em Aberto (Espetinhos, Jantinha e consumo no local) */}
+      {/* Modal de Comandas (Cadastradas + Em Aberto) */}
       <Modal
         open={comandasModalOpen}
-        title={`Comandas em Aberto (${comandas.length})`}
+        title={`Comandas (${comandas.filter((c) => c.status === 'ABERTA').length} em uso • ${comandas.length} disponíveis)`}
         onClose={() => {
           setComandasModalOpen(false);
           setComandaError(null);
@@ -1891,7 +1928,9 @@ export function PdvPage() {
             >
               <div className="flex items-center justify-between">
                 <span className="font-label-md font-bold text-amber-950">
-                  Abrir nova comanda com os {itemsCount} {itemsCount === 1 ? 'item' : 'itens'} do caixa ({formatBRL(total)})
+                  {comandas.some((c) => c.status === 'LIVRE')
+                    ? `Selecione uma comanda livre abaixo ou abra uma avulsa (${itemsCount} ${itemsCount === 1 ? 'item' : 'itens'} • ${formatBRL(total)})`
+                    : `Abrir nova comanda avulsa (${itemsCount} ${itemsCount === 1 ? 'item' : 'itens'} • ${formatBRL(total)})`}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1919,7 +1958,7 @@ export function PdvPage() {
                 disabled={savingComanda}
                 className="w-full py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 font-label-md font-extrabold"
               >
-                {savingComanda ? 'Salvando...' : 'Abrir Comanda e Liberar Caixa'}
+                {savingComanda ? 'Salvando...' : 'Abrir Comanda Avulsa e Liberar Caixa'}
               </button>
             </form>
           )}
@@ -1930,54 +1969,94 @@ export function PdvPage() {
                 <span className="material-symbols-outlined text-[34px] text-outline-variant mb-1 block">
                   receipt_long
                 </span>
-                <p className="font-label-md font-bold">Nenhuma comanda aberta no momento</p>
+                <p className="font-label-md font-bold">Nenhuma comanda cadastrada ou aberta</p>
                 <p className="font-body-sm mt-0.5">
-                  Lance os itens no caixa e clique em "Salvar em Comanda".
+                  Cadastre suas mesas/comandas no menu Comandas do ERP ou lance itens no caixa.
                 </p>
               </div>
             ) : (
-              comandas.map((c) => (
-                <div
-                  key={c.id}
-                  className="p-3 rounded-xl border border-slate-200 bg-surface-container-low/60 flex flex-col gap-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-label-lg font-bold text-primary">
-                        {c.identificador}
-                      </p>
-                      <p className="font-body-sm text-on-surface-variant">
-                        {c.items.length} {c.items.length === 1 ? 'item' : 'itens'} • Aberta às {c.createdAt}
-                        {c.observacao ? ` • ${c.observacao}` : ''}
-                      </p>
+              comandas.map((c) => {
+                const isLivre = c.status === 'LIVRE';
+                return (
+                  <div
+                    key={c.id}
+                    className={`p-3 rounded-xl border flex flex-col gap-2 ${
+                      isLivre
+                        ? 'border-emerald-200 bg-emerald-50/40'
+                        : 'border-amber-200 bg-amber-50/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-label-lg font-bold text-primary">
+                            {c.identificador}
+                          </p>
+                          <span
+                            className={`px-2 py-0.5 rounded-full font-label-sm font-bold ${
+                              isLivre
+                                ? 'bg-tertiary-fixed/50 text-tertiary'
+                                : 'bg-amber-200 text-amber-950'
+                            }`}
+                          >
+                            {isLivre ? 'Livre' : 'Em Uso'}
+                          </span>
+                        </div>
+                        <p className="font-body-sm text-on-surface-variant">
+                          {isLivre
+                            ? c.observacao || 'Disponível para novo atendimento'
+                            : `${c.items.length} ${c.items.length === 1 ? 'item' : 'itens'} • Atualizada às ${c.updatedAt}${c.observacao ? ` • ${c.observacao}` : ''}`}
+                        </p>
+                      </div>
+                      <span className="font-headline-sm font-extrabold text-primary tabular-nums">
+                        {isLivre ? '—' : formatBRL(c.total)}
+                      </span>
                     </div>
-                    <span className="font-headline-sm font-extrabold text-primary tabular-nums">
-                      {formatBRL(c.total)}
-                    </span>
-                  </div>
 
-                  <p className="font-body-sm text-on-surface-variant truncate">
-                    {c.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
-                  </p>
+                    {!isLivre && (
+                      <p className="font-body-sm text-on-surface-variant truncate">
+                        {c.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
+                      </p>
+                    )}
 
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteComanda(c.id)}
-                      className="px-3 py-1.5 rounded-lg text-error bg-error-container/50 hover:bg-error-container font-label-sm font-bold"
-                    >
-                      Cancelar Comanda
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleLoadComanda(c)}
-                      className="px-3.5 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-sm font-extrabold"
-                    >
-                      Abrir no Caixa / Adicionar ou Fechar
-                    </button>
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      {isLivre ? (
+                        cart.length > 0 && !activeComanda ? (
+                          <button
+                            type="button"
+                            disabled={savingComanda}
+                            onClick={() => void handleAssignToComanda(c.id, c.identificador)}
+                            className="px-3.5 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-sm font-extrabold"
+                          >
+                            Lançar {itemsCount} {itemsCount === 1 ? 'item' : 'itens'} nesta Comanda
+                          </button>
+                        ) : (
+                          <span className="font-body-sm text-on-surface-variant">
+                            Adicione itens no caixa para lançar aqui
+                          </span>
+                        )
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteComanda(c.id)}
+                            className="px-3 py-1.5 rounded-lg text-error bg-error-container/50 hover:bg-error-container font-label-sm font-bold"
+                          >
+                            {c.cadastrada ? 'Liberar Comanda' : 'Cancelar Comanda'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleLoadComanda(c)}
+                            className="px-3.5 py-1.5 rounded-lg bg-[#3DDB8F] hover:bg-[#32c77f] text-[#0F172A] font-label-sm font-extrabold"
+                          >
+                            Abrir no Caixa / Adicionar ou Fechar
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

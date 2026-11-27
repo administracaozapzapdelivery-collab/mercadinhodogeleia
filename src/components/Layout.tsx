@@ -32,6 +32,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Dashboard', path: '/dashboard', icon: 'dashboard' },
       { label: 'Vendas e Cupons', path: '/vendas-e-cupons', icon: 'receipt_long' },
+      { label: 'Comandas', path: '/comandas', icon: 'restaurant' },
     ],
   },
   {
@@ -71,6 +72,7 @@ const navGroups: NavGroup[] = [
 const routeTitles: Record<string, string> = {
   '/dashboard': 'Visão Geral — Mercadinho do Geleia',
   '/vendas-e-cupons': 'Vendas e Cupons Fiscais',
+  '/comandas': 'Comandas e Mesas',
   '/produtos': 'Produtos e Estoque',
   '/produtos/novo': 'Cadastrar Novo Produto',
   '/categorias': 'Categorias de Produtos',

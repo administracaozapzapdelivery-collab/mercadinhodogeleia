@@ -482,18 +482,20 @@ salesAndPdvRouter.get('/comandas', requireAuth, async (_req, res) => {
       id: number;
       identificador: string;
       observacao: string | null;
+      status: string;
+      cadastrada: boolean;
       created_at: string;
       updated_at: string;
       operador: string | null;
     }>(
-      `SELECT c.id, c.identificador, c.observacao,
+      `SELECT c.id, c.identificador, c.observacao, c.status, c.cadastrada,
               TO_CHAR(c.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS created_at,
               TO_CHAR(c.updated_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS updated_at,
               u.nome AS operador
        FROM comandas c
        LEFT JOIN usuarios u ON u.id = c.usuario_id
-       WHERE c.status = 'ABERTA'
-       ORDER BY c.updated_at DESC, c.id DESC`
+       WHERE c.ativo = TRUE AND (c.cadastrada = TRUE OR c.status = 'ABERTA')
+       ORDER BY (c.status = 'ABERTA') DESC, c.cadastrada DESC, c.identificador ASC, c.id ASC`
     );
 
     if (comandasRes.rows.length === 0) {
@@ -552,6 +554,8 @@ salesAndPdvRouter.get('/comandas', requireAuth, async (_req, res) => {
           id: String(c.id),
           identificador: c.identificador,
           observacao: c.observacao ?? '',
+          status: c.status,
+          cadastrada: c.cadastrada,
           createdAt: c.created_at,
           updatedAt: c.updated_at,
           operator: c.operador ?? 'Operador',
@@ -568,16 +572,73 @@ salesAndPdvRouter.get('/comandas', requireAuth, async (_req, res) => {
 salesAndPdvRouter.post('/comandas', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { identificador, observacao, items } = req.body as {
-      identificador: string;
+    const { identificador, observacao, items, cadastrada, prefixo, inicio, fim } = req.body as {
+      identificador?: string;
       observacao?: string;
-      items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+      cadastrada?: boolean;
+      prefixo?: string;
+      inicio?: number;
+      fim?: number;
+      items?: Array<{ productId: string; quantity: number; unitPrice: number }>;
     };
-    const label = String(identificador ?? '').trim();
-    if (!label) {
-      res.status(400).json({ error: 'Informe a identificação da comanda (ex: Mesa 01 ou Nome).' });
+
+    // Cadastro em lote de comandas/mesas (ex: MESA 01 a MESA 10)
+    if (cadastrada && prefixo !== undefined && inicio !== undefined && fim !== undefined) {
+      const start = Math.max(1, Math.floor(Number(inicio)));
+      const end = Math.min(start + 49, Math.floor(Number(fim)));
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+        res.status(400).json({ error: 'Intervalo inválido para cadastro em lote.' });
+        return;
+      }
+      const pref = String(prefixo).trim();
+      await client.query('BEGIN');
+      let createdCount = 0;
+      for (let n = start; n <= end; n++) {
+        const label = `${pref ? `${pref} ` : ''}${String(n).padStart(2, '0')}`;
+        const exists = await client.query(
+          `SELECT id FROM comandas WHERE LOWER(TRIM(identificador)) = LOWER($1) AND ativo = TRUE LIMIT 1`,
+          [label]
+        );
+        if (exists.rows.length === 0) {
+          await client.query(
+            `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+             VALUES ($1, $2, 'LIVRE', TRUE, TRUE, $3)`,
+            [label, observacao?.trim() || null, req.user!.id]
+          );
+          createdCount++;
+        }
+      }
+      await client.query('COMMIT');
+      res.status(201).json({ ok: true, createdCount });
       return;
     }
+
+    const label = String(identificador ?? '').trim();
+    if (!label) {
+      res.status(400).json({ error: 'Informe a identificação da comanda (ex: MESA 01 ou Nome).' });
+      return;
+    }
+
+    // Cadastro individual de comanda fixa/reutilizável
+    if (cadastrada) {
+      const exists = await pool.query(
+        `SELECT id FROM comandas WHERE LOWER(TRIM(identificador)) = LOWER($1) AND ativo = TRUE LIMIT 1`,
+        [label]
+      );
+      if (exists.rows.length > 0) {
+        res.status(409).json({ error: `Já existe uma comanda cadastrada com o nome "${label}".` });
+        return;
+      }
+      const inserted = await pool.query<{ id: number }>(
+        `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+         VALUES ($1, $2, 'LIVRE', TRUE, TRUE, $3) RETURNING id`,
+        [label, observacao?.trim() || null, req.user!.id]
+      );
+      res.status(201).json({ id: String(inserted.rows[0].id), ok: true });
+      return;
+    }
+
+    // Abertura avulsa no PDV com itens
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'Adicione pelo menos um item para abrir a comanda.' });
       return;
@@ -585,8 +646,8 @@ salesAndPdvRouter.post('/comandas', requireAuth, async (req, res) => {
 
     await client.query('BEGIN');
     const inserted = await client.query<{ id: number }>(
-      `INSERT INTO comandas (identificador, observacao, status, usuario_id)
-       VALUES ($1, $2, 'ABERTA', $3) RETURNING id`,
+      `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+       VALUES ($1, $2, 'ABERTA', FALSE, TRUE, $3) RETURNING id`,
       [label, observacao?.trim() || null, req.user!.id]
     );
     const comandaId = inserted.rows[0].id;
@@ -628,8 +689,8 @@ salesAndPdvRouter.put('/comandas/:id', requireAuth, async (req, res) => {
 
     await client.query('BEGIN');
     await client.query(
-      `UPDATE comandas SET observacao = COALESCE($1, observacao), updated_at = NOW()
-       WHERE id = $2 AND status = 'ABERTA'`,
+      `UPDATE comandas SET status = 'ABERTA', observacao = COALESCE($1, observacao), updated_at = NOW()
+       WHERE id = $2 AND ativo = TRUE`,
       [observacao?.trim() || null, id]
     );
     await client.query('DELETE FROM comanda_itens WHERE comanda_id = $1', [id]);
@@ -651,6 +712,7 @@ salesAndPdvRouter.put('/comandas/:id', requireAuth, async (req, res) => {
 });
 
 salesAndPdvRouter.post('/comandas/:id/close', requireAuth, async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = parsePositiveId(req.params.id);
     if (!id) {
@@ -658,27 +720,67 @@ salesAndPdvRouter.post('/comandas/:id/close', requireAuth, async (req, res) => {
       return;
     }
     const { vendaId } = req.body as { vendaId?: string | number };
-    await pool.query(
-      `UPDATE comandas SET status = 'FECHADA', venda_id = $1, updated_at = NOW()
-       WHERE id = $2`,
-      [vendaId ? Number(vendaId) : null, id]
+    await client.query('BEGIN');
+    const existing = await client.query<{ cadastrada: boolean }>(
+      'SELECT cadastrada FROM comandas WHERE id = $1',
+      [id]
     );
+    if (existing.rows[0]?.cadastrada) {
+      await client.query('DELETE FROM comanda_itens WHERE comanda_id = $1', [id]);
+      await client.query(
+        `UPDATE comandas SET status = 'LIVRE', observacao = NULL, venda_id = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [id]
+      );
+    } else {
+      await client.query(
+        `UPDATE comandas SET status = 'FECHADA', venda_id = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [vendaId ? Number(vendaId) : null, id]
+      );
+    }
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
   }
 });
 
 salesAndPdvRouter.delete('/comandas/:id', requireAuth, async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = parsePositiveId(req.params.id);
     if (!id) {
       res.status(400).json({ error: 'ID de comanda inválido.' });
       return;
     }
-    await pool.query(`DELETE FROM comandas WHERE id = $1 AND status = 'ABERTA'`, [id]);
+    const archive = req.query.mode === 'archive';
+    await client.query('BEGIN');
+    const existing = await client.query<{ cadastrada: boolean }>(
+      'SELECT cadastrada FROM comandas WHERE id = $1',
+      [id]
+    );
+    if (archive) {
+      await client.query('DELETE FROM comanda_itens WHERE comanda_id = $1', [id]);
+      await client.query('UPDATE comandas SET ativo = FALSE, updated_at = NOW() WHERE id = $1', [id]);
+    } else if (existing.rows[0]?.cadastrada) {
+      await client.query('DELETE FROM comanda_itens WHERE comanda_id = $1', [id]);
+      await client.query(
+        `UPDATE comandas SET status = 'LIVRE', observacao = NULL, updated_at = NOW() WHERE id = $1`,
+        [id]
+      );
+    } else {
+      await client.query(`DELETE FROM comandas WHERE id = $1 AND status = 'ABERTA'`, [id]);
+    }
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
   }
 });
