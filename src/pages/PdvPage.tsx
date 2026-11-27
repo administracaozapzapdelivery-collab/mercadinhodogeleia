@@ -664,7 +664,7 @@ export function PdvPage() {
   }, [checkoutOpen, crediarioModalOpen, switchOpen, printConfirmOpen, openCheckoutModal]);
 
   return (
-    <div className="h-screen bg-surface flex flex-col overflow-hidden">
+    <div className="min-h-screen xl:h-screen bg-surface flex flex-col xl:overflow-hidden">
       {/* Toast Flutuante de Erro */}
       {feedback?.type === 'err' && (
         <div
@@ -685,8 +685,8 @@ export function PdvPage() {
       )}
 
       {/* Header Profissional do PDV */}
-      <header className="h-14 shrink-0 bg-primary-container text-white px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 shadow-md">
-        <div className="min-w-0 flex items-center gap-2 sm:gap-3">
+      <header className="h-auto py-2.5 sm:py-0 sm:h-14 shrink-0 bg-primary-container text-white px-3 sm:px-4 lg:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shadow-md">
+        <div className="shrink-0 xl:min-w-0 flex items-center justify-between sm:justify-start gap-2 sm:gap-3">
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
@@ -701,9 +701,21 @@ export function PdvPage() {
               {company?.nome_fantasia || 'Mercadinho do Geleia'} — PDV 01
             </span>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              navigate('/login?redirect=/pdv', { replace: true });
+            }}
+            title="Encerrar sessão do operador (mantém o caixa aberto)"
+            className="sm:hidden inline-flex items-center gap-1 px-2.5 h-8 rounded-full bg-error/80 hover:bg-error text-white font-label-sm font-bold whitespace-nowrap shrink-0 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[15px] shrink-0">logout</span>
+            <span>Sair</span>
+          </button>
         </div>
 
-        <div className="shrink-0 flex items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-1.5 sm:gap-2">
           <div className="hidden xl:flex items-center gap-1.5 px-3 h-8 rounded-full bg-white/10 text-xs font-semibold whitespace-nowrap shrink-0">
             <span>F2 Buscar</span>
             <span>•</span>
@@ -720,7 +732,7 @@ export function PdvPage() {
               setPriceCheckQuery('');
               setPriceCheckOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
           >
             <span className="material-symbols-outlined text-[16px] shrink-0">price_check</span>
             <span>Consultar Preço</span>
@@ -733,7 +745,7 @@ export function PdvPage() {
               void loadComandas();
               setComandasModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 h-8 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
           >
             <span className="material-symbols-outlined text-[16px] shrink-0">receipt_long</span>
             <span>
@@ -742,15 +754,15 @@ export function PdvPage() {
           </button>
 
           {openShift ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-[#A9F04D] text-[#0F172A] font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0">
+            <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 h-8 rounded-full bg-[#A9F04D] text-[#0F172A] font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0">
               <span className="w-2 h-2 rounded-full bg-[#0F172A] shrink-0" />
-              Caixa Aberto
+              <span>Caixa Aberto</span>
             </span>
           ) : (
             <button
               type="button"
               onClick={() => navigate('/fluxo-de-caixa/abertura-fechamento')}
-              className="px-2.5 sm:px-3 h-8 rounded-full bg-error text-white font-label-sm font-bold uppercase whitespace-nowrap shrink-0"
+              className="w-full sm:w-auto px-3 h-8 rounded-full bg-error text-white font-label-sm font-bold uppercase whitespace-nowrap shrink-0"
             >
               Caixa Fechado (Abrir)
             </button>
@@ -779,7 +791,7 @@ export function PdvPage() {
               navigate('/login?redirect=/pdv', { replace: true });
             }}
             title="Encerrar sessão do operador (mantém o caixa aberto)"
-            className="inline-flex items-center gap-1 px-2.5 h-8 rounded-full bg-error/80 hover:bg-error text-white font-label-sm font-bold whitespace-nowrap shrink-0 transition-colors"
+            className="hidden sm:inline-flex items-center gap-1 px-2.5 h-8 rounded-full bg-error/80 hover:bg-error text-white font-label-sm font-bold whitespace-nowrap shrink-0 transition-colors"
           >
             <span className="material-symbols-outlined text-[15px] shrink-0">logout</span>
             <span>Sair</span>
@@ -940,7 +952,7 @@ export function PdvPage() {
         </section>
 
         {/* Coluna Direita (5 cols ~42%) — Cupom Fiscal & Checkout */}
-        <section className="flex-1 xl:col-span-5 bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-0 overflow-hidden">
+        <section className="flex-1 xl:col-span-5 bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm flex flex-col xl:min-h-0 xl:overflow-hidden">
           <div className="px-4 py-3 border-b border-surface-container bg-surface-container-low flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-primary-container">receipt_long</span>
@@ -964,7 +976,7 @@ export function PdvPage() {
           </div>
 
           {/* Lista de Itens do Cupom */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 min-h-[200px] xl:min-h-0 overflow-y-auto p-3 space-y-2">
             {activeComanda && (
               <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1004,7 +1016,7 @@ export function PdvPage() {
             )}
 
             {cart.length === 0 && feedback?.type !== 'ok' && (
-              <div className="h-full flex flex-col items-center justify-center text-center py-10 text-on-surface-variant">
+              <div className="min-h-full flex flex-col items-center justify-center text-center py-4 sm:py-10 px-3 text-on-surface-variant">
                 <span className="material-symbols-outlined text-[42px] text-outline-variant mb-2">
                   shopping_cart
                 </span>

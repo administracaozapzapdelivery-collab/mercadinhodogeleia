@@ -184,17 +184,16 @@ export function ErpLayout() {
         </div>
 
         <div className="px-space-lg pb-space-md">
-          <button
-            type="button"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              navigate('/pdv');
-            }}
+          <a
+            href="/pdv"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileMenuOpen(false)}
             className="w-full flex items-center justify-center gap-space-sm py-3 px-space-md rounded-lg bg-tertiary-fixed-dim hover:bg-tertiary-fixed text-tertiary font-label-lg text-label-lg font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
           >
             <span className="material-symbols-outlined text-[20px]">point_of_sale</span>
             <span>Abrir Frente de Caixa</span>
-          </button>
+          </a>
         </div>
 
         <div className="overflow-y-auto flex-1 px-space-md space-y-space-md pb-space-lg">
