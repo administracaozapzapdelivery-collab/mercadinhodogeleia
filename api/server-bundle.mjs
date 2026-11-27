@@ -72,6 +72,35 @@ async function initDatabase() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS comandas (
+      id SERIAL PRIMARY KEY,
+      identificador VARCHAR(80) NOT NULL,
+      observacao VARCHAR(200),
+      status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
+      cadastrada BOOLEAN NOT NULL DEFAULT FALSE,
+      ativo BOOLEAN NOT NULL DEFAULT TRUE,
+      usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      venda_id INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    "ALTER TABLE comandas ADD COLUMN IF NOT EXISTS cadastrada BOOLEAN NOT NULL DEFAULT FALSE"
+  );
+  await pool.query(
+    "ALTER TABLE comandas ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE"
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS comanda_itens (
+      id SERIAL PRIMARY KEY,
+      comanda_id INTEGER NOT NULL REFERENCES comandas(id) ON DELETE CASCADE,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+      quantidade NUMERIC(10,3) NOT NULL DEFAULT 1,
+      preco_unitario NUMERIC(10,2) NOT NULL DEFAULT 0.00
+    )
+  `);
+  await pool.query(`
     INSERT INTO clientes (nome, telefone_whatsapp, limite_credito, saldo_devedor, status_credito)
     SELECT 'Venda no Balc\xE3o', '', 0.00, 0.00, 'EM_DIA'
     WHERE NOT EXISTS (
@@ -662,6 +691,14 @@ authAndUsersRouter.delete("/users/:id", requireAuth, requireRole("ADMIN"), async
       res.status(400).json({ error: "N\xE3o \xE9 poss\xEDvel excluir o pr\xF3prio usu\xE1rio logado." });
       return;
     }
+    const existing = await pool.query(
+      "SELECT email FROM usuarios WHERE id = $1",
+      [id]
+    );
+    if ((existing.rows[0]?.email ?? "").trim().toLowerCase() === "everaldozs@gmail.com") {
+      res.status(403).json({ error: "O usu\xE1rio administrador principal n\xE3o pode ser exclu\xEDdo." });
+      return;
+    }
     try {
       await pool.query("DELETE FROM usuarios WHERE id = $1", [id]);
       await logAudit(req.user.id, "EXCLUIU_USUARIO", "usuarios", id);
@@ -906,9 +943,18 @@ catalogRouter.get("/products/expiring", requireAuth, async (_req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+function isNumericOnlyProductName(value) {
+  return typeof value === "string" && /^\d+$/.test(value.trim());
+}
 catalogRouter.post("/products", requireAuth, requireRole("ADMIN", "GERENTE"), async (req, res) => {
   try {
     const { sku, barcode, name, category, unit, costPrice, salePrice, stock, minStock, expiryDate, photoUrl, adminOnly } = req.body;
+    if (!String(name ?? "").trim() || isNumericOnlyProductName(name)) {
+      res.status(400).json({
+        error: "O nome do produto n\xE3o pode conter apenas n\xFAmeros. Informe uma descri\xE7\xE3o v\xE1lida."
+      });
+      return;
+    }
     const catRes = await pool.query("SELECT id FROM categorias WHERE nome = $1 LIMIT 1", [category]);
     const catId = catRes.rows[0]?.id ?? 1;
     const unitDb = unit === "kg" ? "KG" : unit === "L" ? "LT" : unit === "cx" ? "CX" : "UN";
@@ -930,6 +976,12 @@ catalogRouter.put("/products/:id", requireAuth, requireRole("ADMIN", "GERENTE"),
       return;
     }
     const { name, barcode, category, unit, salePrice, costPrice, minStock, stock, expiryDate, adminOnly } = req.body;
+    if (name !== void 0 && (!String(name).trim() || isNumericOnlyProductName(name))) {
+      res.status(400).json({
+        error: "O nome do produto n\xE3o pode conter apenas n\xFAmeros. Informe uma descri\xE7\xE3o v\xE1lida."
+      });
+      return;
+    }
     let catId = null;
     if (category) {
       const catRes = await pool.query("SELECT id FROM categorias WHERE nome = $1 LIMIT 1", [category]);
@@ -1184,13 +1236,19 @@ salesAndPdvRouter.post("/sales", requireAuth, async (req, res, next) => {
         return;
       }
       const cliRes = await client.query(
-        "SELECT limite_credito, saldo_devedor, status_credito FROM clientes WHERE id = $1",
+        "SELECT nome, limite_credito, saldo_devedor, status_credito FROM clientes WHERE id = $1",
         [parsedCustomerId]
       );
       const cli = cliRes.rows[0];
       if (!cli) {
         await client.query("ROLLBACK");
         res.status(404).json({ error: "Cliente de Credi\xE1rio n\xE3o encontrado." });
+        return;
+      }
+      const cliNomeNorm = cli.nome.trim().toLowerCase();
+      if (cliNomeNorm === "venda no balc\xE3o" || cliNomeNorm === "vendas no balc\xE3o") {
+        await client.query("ROLLBACK");
+        res.status(400).json({ error: 'O cliente "Venda no Balc\xE3o" n\xE3o pode ser utilizado em vendas no Credi\xE1rio.' });
         return;
       }
       const saldoAtual = Number(cli.saldo_devedor);
@@ -1406,10 +1464,268 @@ salesAndPdvRouter.post("/sales/:id/cancel", requireAuth, pinRateLimiter, async (
     client.release();
   }
 });
+salesAndPdvRouter.get("/comandas", requireAuth, async (_req, res) => {
+  try {
+    const comandasRes = await pool.query(
+      `SELECT c.id, c.identificador, c.observacao, c.status, c.cadastrada,
+              TO_CHAR(c.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS created_at,
+              TO_CHAR(c.updated_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS updated_at,
+              u.nome AS operador
+       FROM comandas c
+       LEFT JOIN usuarios u ON u.id = c.usuario_id
+       WHERE c.ativo = TRUE AND (c.cadastrada = TRUE OR c.status = 'ABERTA')
+       ORDER BY (c.status = 'ABERTA') DESC, c.cadastrada DESC, c.identificador ASC, c.id ASC`
+    );
+    if (comandasRes.rows.length === 0) {
+      res.json([]);
+      return;
+    }
+    const ids = comandasRes.rows.map((r) => r.id);
+    const itensRes = await pool.query(
+      `SELECT ci.comanda_id, ci.produto_id, p.nome AS product_name,
+              LOWER(p.unidade_medida::text) AS unit,
+              ci.quantidade, ci.preco_unitario
+       FROM comanda_itens ci
+       JOIN produtos p ON p.id = ci.produto_id
+       WHERE ci.comanda_id = ANY($1::int[])
+       ORDER BY ci.id ASC`,
+      [ids]
+    );
+    const itemsByComanda = /* @__PURE__ */ new Map();
+    for (const row of itensRes.rows) {
+      const qty = Number(row.quantidade);
+      const price = Number(row.preco_unitario);
+      const list = itemsByComanda.get(row.comanda_id) ?? [];
+      list.push({
+        productId: String(row.produto_id),
+        productName: row.product_name,
+        unit: row.unit === "lt" ? "L" : row.unit,
+        quantity: qty,
+        unitPrice: price,
+        subtotal: qty * price
+      });
+      itemsByComanda.set(row.comanda_id, list);
+    }
+    res.json(
+      comandasRes.rows.map((c) => {
+        const items = itemsByComanda.get(c.id) ?? [];
+        const total = items.reduce((acc, it) => acc + it.subtotal, 0);
+        return {
+          id: String(c.id),
+          identificador: c.identificador,
+          observacao: c.observacao ?? "",
+          status: c.status,
+          cadastrada: c.cadastrada,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+          operator: c.operador ?? "Operador",
+          items,
+          total
+        };
+      })
+    );
+  } catch (err) {
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+salesAndPdvRouter.post("/comandas", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { identificador, observacao, items, cadastrada, prefixo, inicio, fim } = req.body;
+    if (cadastrada && prefixo !== void 0 && inicio !== void 0 && fim !== void 0) {
+      const start = Math.max(1, Math.floor(Number(inicio)));
+      const end = Math.min(start + 49, Math.floor(Number(fim)));
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+        res.status(400).json({ error: "Intervalo inv\xE1lido para cadastro em lote." });
+        return;
+      }
+      const pref = String(prefixo).trim();
+      await client.query("BEGIN");
+      let createdCount = 0;
+      for (let n = start; n <= end; n++) {
+        const label2 = `${pref ? `${pref} ` : ""}${String(n).padStart(2, "0")}`;
+        const exists = await client.query(
+          `SELECT id FROM comandas WHERE LOWER(TRIM(identificador)) = LOWER($1) AND ativo = TRUE LIMIT 1`,
+          [label2]
+        );
+        if (exists.rows.length === 0) {
+          await client.query(
+            `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+             VALUES ($1, $2, 'LIVRE', TRUE, TRUE, $3)`,
+            [label2, observacao?.trim() || null, req.user.id]
+          );
+          createdCount++;
+        }
+      }
+      await client.query("COMMIT");
+      res.status(201).json({ ok: true, createdCount });
+      return;
+    }
+    const label = String(identificador ?? "").trim();
+    if (!label) {
+      res.status(400).json({ error: "Informe a identifica\xE7\xE3o da comanda (ex: MESA 01 ou Nome)." });
+      return;
+    }
+    if (cadastrada) {
+      const exists = await pool.query(
+        `SELECT id FROM comandas WHERE LOWER(TRIM(identificador)) = LOWER($1) AND ativo = TRUE LIMIT 1`,
+        [label]
+      );
+      if (exists.rows.length > 0) {
+        res.status(409).json({ error: `J\xE1 existe uma comanda cadastrada com o nome "${label}".` });
+        return;
+      }
+      const inserted2 = await pool.query(
+        `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+         VALUES ($1, $2, 'LIVRE', TRUE, TRUE, $3) RETURNING id`,
+        [label, observacao?.trim() || null, req.user.id]
+      );
+      res.status(201).json({ id: String(inserted2.rows[0].id), ok: true });
+      return;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: "Adicione pelo menos um item para abrir a comanda." });
+      return;
+    }
+    await client.query("BEGIN");
+    const inserted = await client.query(
+      `INSERT INTO comandas (identificador, observacao, status, cadastrada, ativo, usuario_id)
+       VALUES ($1, $2, 'ABERTA', FALSE, TRUE, $3) RETURNING id`,
+      [label, observacao?.trim() || null, req.user.id]
+    );
+    const comandaId = inserted.rows[0].id;
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO comanda_itens (comanda_id, produto_id, quantidade, preco_unitario)
+         VALUES ($1, $2, $3, $4)`,
+        [comandaId, Number(item.productId), Number(item.quantity), Number(item.unitPrice)]
+      );
+    }
+    await client.query("COMMIT");
+    res.status(201).json({ id: String(comandaId), ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
+salesAndPdvRouter.put("/comandas/:id", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "ID de comanda inv\xE1lido." });
+      return;
+    }
+    const { items, observacao } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: "A comanda precisa ter ao menos um item." });
+      return;
+    }
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE comandas SET status = 'ABERTA', observacao = COALESCE($1, observacao), updated_at = NOW()
+       WHERE id = $2 AND ativo = TRUE`,
+      [observacao?.trim() || null, id]
+    );
+    await client.query("DELETE FROM comanda_itens WHERE comanda_id = $1", [id]);
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO comanda_itens (comanda_id, produto_id, quantidade, preco_unitario)
+         VALUES ($1, $2, $3, $4)`,
+        [id, Number(item.productId), Number(item.quantity), Number(item.unitPrice)]
+      );
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
+salesAndPdvRouter.post("/comandas/:id/close", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "ID de comanda inv\xE1lido." });
+      return;
+    }
+    const { vendaId } = req.body;
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT cadastrada FROM comandas WHERE id = $1",
+      [id]
+    );
+    if (existing.rows[0]?.cadastrada) {
+      await client.query("DELETE FROM comanda_itens WHERE comanda_id = $1", [id]);
+      await client.query(
+        `UPDATE comandas SET status = 'LIVRE', observacao = NULL, venda_id = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [id]
+      );
+    } else {
+      await client.query(
+        `UPDATE comandas SET status = 'FECHADA', venda_id = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [vendaId ? Number(vendaId) : null, id]
+      );
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
+salesAndPdvRouter.delete("/comandas/:id", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "ID de comanda inv\xE1lido." });
+      return;
+    }
+    const archive = req.query.mode === "archive";
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT cadastrada FROM comandas WHERE id = $1",
+      [id]
+    );
+    if (archive) {
+      await client.query("DELETE FROM comanda_itens WHERE comanda_id = $1", [id]);
+      await client.query("UPDATE comandas SET ativo = FALSE, updated_at = NOW() WHERE id = $1", [id]);
+    } else if (existing.rows[0]?.cadastrada) {
+      await client.query("DELETE FROM comanda_itens WHERE comanda_id = $1", [id]);
+      await client.query(
+        `UPDATE comandas SET status = 'LIVRE', observacao = NULL, updated_at = NOW() WHERE id = $1`,
+        [id]
+      );
+    } else {
+      await client.query(`DELETE FROM comandas WHERE id = $1 AND status = 'ABERTA'`, [id]);
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: safeErrorMessage(err) });
+  } finally {
+    client.release();
+  }
+});
 
 // server/routes/partnersAndFinance.ts
 import { Router as Router4 } from "express";
 var partnersAndFinanceRouter = Router4();
+function isBalcaoCustomerName(name) {
+  const normalized = (name ?? "").trim().toLowerCase();
+  return normalized === "venda no balc\xE3o" || normalized === "vendas no balc\xE3o";
+}
 partnersAndFinanceRouter.post("/customers", requireAuth, async (req, res) => {
   try {
     const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
@@ -1441,8 +1757,13 @@ partnersAndFinanceRouter.put("/customers/:id", requireAuth, async (req, res) => 
       res.status(400).json({ error: "ID inv\xE1lido." });
       return;
     }
+    const existing = await pool.query(
+      "SELECT nome FROM clientes WHERE id = $1",
+      [id]
+    );
+    const isBalcao = isBalcaoCustomerName(existing.rows[0]?.nome);
     const { name, phone, cpf, creditLimit, status, address, dueDay, notes } = req.body;
-    const statusDb = status === "Bloqueado" ? "BLOQUEADO" : status === "Aten\xE7\xE3o" ? "PROXIMO_VENCIMENTO" : status === "Em dia" ? "EM_DIA" : null;
+    const statusDb = isBalcao ? "EM_DIA" : status === "Bloqueado" ? "BLOQUEADO" : status === "Aten\xE7\xE3o" ? "PROXIMO_VENCIMENTO" : status === "Em dia" ? "EM_DIA" : null;
     await pool.query(
       `UPDATE clientes SET
         nome = COALESCE($1, nome),
@@ -1453,17 +1774,19 @@ partnersAndFinanceRouter.put("/customers/:id", requireAuth, async (req, res) => 
         dia_vencimento_preferencial = COALESCE($6, dia_vencimento_preferencial),
         status_credito = COALESCE($7, status_credito),
         observacoes = COALESCE($8, observacoes),
+        saldo_devedor = CASE WHEN $9 THEN 0 ELSE saldo_devedor END,
         updated_at = NOW()
-       WHERE id = $9`,
+       WHERE id = $10`,
       [
-        name ?? null,
+        isBalcao ? null : name ?? null,
         cpf || null,
         phone ?? null,
         address ?? null,
-        creditLimit ?? null,
+        isBalcao ? 0 : creditLimit ?? null,
         dueDay ?? null,
         statusDb,
         notes ?? null,
+        isBalcao,
         id
       ]
     );
@@ -1477,6 +1800,17 @@ partnersAndFinanceRouter.delete("/customers/:id", requireAuth, requireRole("ADMI
     const id = parsePositiveId(req.params.id);
     if (!id) {
       res.status(400).json({ error: "ID inv\xE1lido." });
+      return;
+    }
+    const existing = await pool.query(
+      "SELECT nome FROM clientes WHERE id = $1",
+      [id]
+    );
+    const nome = (existing.rows[0]?.nome ?? "").trim().toLowerCase();
+    if (nome === "venda no balc\xE3o" || nome === "vendas no balc\xE3o") {
+      res.status(403).json({
+        error: 'O cliente padr\xE3o "Venda no Balc\xE3o" n\xE3o pode ser exclu\xEDdo.'
+      });
       return;
     }
     await pool.query("DELETE FROM clientes WHERE id = $1", [id]);
@@ -1517,6 +1851,14 @@ partnersAndFinanceRouter.post("/customers/:id/fiado/pay", requireAuth, async (re
     const val = Number(amount);
     if (!Number.isFinite(val) || val <= 0) {
       res.status(400).json({ error: "Valor de pagamento inv\xE1lido." });
+      return;
+    }
+    const existing = await pool.query(
+      "SELECT nome FROM clientes WHERE id = $1",
+      [id]
+    );
+    if (isBalcaoCustomerName(existing.rows[0]?.nome)) {
+      res.status(403).json({ error: 'O cliente padr\xE3o "Venda no Balc\xE3o" n\xE3o possui credi\xE1rio.' });
       return;
     }
     await client.query("BEGIN");

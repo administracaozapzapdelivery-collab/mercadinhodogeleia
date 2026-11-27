@@ -68,6 +68,7 @@ export function PdvPage() {
   const [qtyMultiplier, setQtyMultiplier] = useState<number>(1);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<string>('0');
+  const [discountMode, setDiscountMode] = useState<'R$' | '%'>('R$');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
   const [cashReceived, setCashReceived] = useState<string>('');
   const [customerId, setCustomerId] = useState<string>('');
@@ -262,7 +263,11 @@ export function PdvPage() {
   }
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.salePrice * item.quantity, 0);
-  const discountVal = Math.max(0, Number(discount) || 0);
+  const rawDiscount = Math.max(0, Number(discount) || 0);
+  const discountVal =
+    discountMode === '%'
+      ? Number(((subtotal * Math.min(100, rawDiscount)) / 100).toFixed(2))
+      : rawDiscount;
   const total = Math.max(0, subtotal - discountVal);
   const itemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const cashVal = Number(cashReceived) || 0;
@@ -680,26 +685,26 @@ export function PdvPage() {
       )}
 
       {/* Header Profissional do PDV */}
-      <header className="h-14 shrink-0 bg-primary-container text-white px-4 lg:px-6 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
+      <header className="h-14 shrink-0 bg-primary-container text-white px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 shadow-md">
+        <div className="min-w-0 flex items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 font-label-md font-semibold transition-colors"
+            className="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white/15 hover:bg-white/25 font-label-md font-semibold transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             <span>ERP</span>
           </button>
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-tertiary-fixed">point_of_sale</span>
-            <span className="font-headline-sm font-bold tracking-tight">
+          <div className="hidden xl:flex items-center gap-2 min-w-0">
+            <span className="material-symbols-outlined text-tertiary-fixed shrink-0">point_of_sale</span>
+            <span className="font-headline-sm font-bold tracking-tight truncate">
               {company?.nome_fantasia || 'Mercadinho do Geleia'} — PDV 01
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold">
+        <div className="shrink-0 flex items-center gap-1.5 sm:gap-2">
+          <div className="hidden xl:flex items-center gap-1.5 px-3 h-8 rounded-full bg-white/10 text-xs font-semibold whitespace-nowrap shrink-0">
             <span>F2 Buscar</span>
             <span>•</span>
             <span>F4 Finalizar</span>
@@ -715,9 +720,9 @@ export function PdvPage() {
               setPriceCheckQuery('');
               setPriceCheckOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-extrabold uppercase transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px]">price_check</span>
+            <span className="material-symbols-outlined text-[16px] shrink-0">price_check</span>
             <span>Consultar Preço</span>
           </button>
 
@@ -728,24 +733,24 @@ export function PdvPage() {
               void loadComandas();
               setComandasModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px]">receipt_long</span>
+            <span className="material-symbols-outlined text-[16px] shrink-0">receipt_long</span>
             <span>
               Comandas ({comandas.filter((c) => c.status === 'ABERTA').length}/{comandas.length})
             </span>
           </button>
 
           {openShift ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#A9F04D] text-[#0F172A] font-label-sm font-extrabold uppercase">
-              <span className="w-2 h-2 rounded-full bg-[#0F172A]" />
+            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-[#A9F04D] text-[#0F172A] font-label-sm font-extrabold uppercase whitespace-nowrap shrink-0">
+              <span className="w-2 h-2 rounded-full bg-[#0F172A] shrink-0" />
               Caixa Aberto
             </span>
           ) : (
             <button
               type="button"
               onClick={() => navigate('/fluxo-de-caixa/abertura-fechamento')}
-              className="px-3 py-1 rounded-full bg-error text-white font-label-sm font-bold uppercase"
+              className="px-2.5 sm:px-3 h-8 rounded-full bg-error text-white font-label-sm font-bold uppercase whitespace-nowrap shrink-0"
             >
               Caixa Fechado (Abrir)
             </button>
@@ -760,11 +765,11 @@ export function PdvPage() {
               setSwitchOpen(true);
             }}
             title="Trocar Operador nesta aba"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-bold transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white font-label-sm font-bold whitespace-nowrap shrink-0 transition-colors"
           >
-            <span className="material-symbols-outlined text-[15px]">person</span>
-            <span>{currentUser?.nome ?? 'Operador'}</span>
-            <span className="material-symbols-outlined text-[14px]">swap_horiz</span>
+            <span className="material-symbols-outlined text-[15px] shrink-0">person</span>
+            <span className="max-w-[100px] lg:max-w-[150px] truncate">{currentUser?.nome ?? 'Operador'}</span>
+            <span className="material-symbols-outlined text-[14px] shrink-0">swap_horiz</span>
           </button>
 
           <button
@@ -774,18 +779,22 @@ export function PdvPage() {
               navigate('/login?redirect=/pdv', { replace: true });
             }}
             title="Encerrar sessão do operador (mantém o caixa aberto)"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-error/80 hover:bg-error text-white font-label-sm font-bold transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 h-8 rounded-full bg-error/80 hover:bg-error text-white font-label-sm font-bold whitespace-nowrap shrink-0 transition-colors"
           >
-            <span className="material-symbols-outlined text-[15px]">logout</span>
+            <span className="material-symbols-outlined text-[15px] shrink-0">logout</span>
             <span>Sair</span>
           </button>
         </div>
       </header>
 
       {/* Split View: Esquerda (Catálogo & Scanner) | Direita (Cupom Fiscal) */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4 p-4">
+      <div className="flex-1 min-h-0 flex flex-col xl:grid xl:grid-cols-12 gap-4 p-4">
         {/* Coluna Esquerda (7 cols ~58%) */}
-        <section className="lg:col-span-7 flex flex-col gap-3 min-h-0">
+        <section
+          className={`${
+            query.trim() ? 'flex-1 min-h-0' : 'shrink-0'
+          } xl:col-span-7 flex flex-col gap-3 xl:min-h-0`}
+        >
           {/* Barra de Scanner + Multiplicador */}
           <div className="bg-surface-container-lowest p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2.5">
             <div className="flex flex-col sm:flex-row gap-2">
@@ -915,7 +924,7 @@ export function PdvPage() {
               </div>
             </div>
           ) : (
-            <div className="flex-1 min-h-0 flex items-center justify-center bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm p-8">
+            <div className="hidden xl:flex flex-1 min-h-0 items-center justify-center bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm p-8">
               <div className="text-center flex flex-col items-center">
                 <div className="w-24 h-24 rounded-2xl bg-primary-container text-white flex flex-col items-center justify-center shadow-lg mb-5 ring-4 ring-tertiary-fixed/60">
                   <span className="material-symbols-outlined text-[42px] text-tertiary-fixed">
@@ -931,7 +940,7 @@ export function PdvPage() {
         </section>
 
         {/* Coluna Direita (5 cols ~42%) — Cupom Fiscal & Checkout */}
-        <section className="lg:col-span-5 bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-0 overflow-hidden">
+        <section className="flex-1 xl:col-span-5 bg-surface-container-lowest rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-surface-container bg-surface-container-low flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-primary-container">receipt_long</span>
@@ -1067,20 +1076,45 @@ export function PdvPage() {
           {/* Rodapé de Pagamento e Total */}
           <div className="p-4 border-t border-surface-container bg-surface-container-low space-y-3 shrink-0">
             {/* Desconto & Subtotal */}
-            <div className="flex items-center justify-between gap-3 text-body-sm">
+            <div className="flex items-center justify-between gap-3 text-body-sm flex-wrap">
               <div className="flex items-center gap-2">
                 <label htmlFor="pdv-discount" className="font-label-sm uppercase text-on-surface-variant">
-                  Desconto (R$):
+                  Desconto:
                 </label>
+                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                  {(['R$', '%'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setDiscountMode(mode);
+                        setDiscount('0');
+                      }}
+                      className={`px-2 py-0.5 rounded-md text-xs font-bold transition-colors ${
+                        discountMode === mode
+                          ? 'bg-primary-container text-white'
+                          : 'text-on-surface-variant hover:bg-surface-container'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
                 <input
                   id="pdv-discount"
                   type="number"
                   min="0"
-                  step="0.50"
+                  max={discountMode === '%' ? 100 : undefined}
+                  step={discountMode === '%' ? '1' : '0.50'}
                   value={discount}
                   onChange={(e) => setDiscount(e.target.value)}
                   className="w-20 h-8 px-2 rounded-lg border border-slate-200 bg-white font-bold tabular-nums text-right"
                 />
+                {discountMode === '%' && discountVal > 0 && (
+                  <span className="text-xs font-semibold text-error tabular-nums">
+                    (-{formatBRL(discountVal)})
+                  </span>
+                )}
               </div>
               <span className="text-on-surface-variant tabular-nums">
                 Subtotal: <strong>{formatBRL(subtotal)}</strong>
