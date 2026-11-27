@@ -25,8 +25,15 @@ export function ProductFormPage() {
   const [expiryDate, setExpiryDate] = useState('');
   const [adminOnly, setAdminOnly] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [barcodeError, setBarcodeError] = useState(false);
   const [nameError, setNameError] = useState(false);
+  const [saleError, setSaleError] = useState(false);
+  const [expiryError, setExpiryError] = useState(false);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const saleInputRef = useRef<HTMLInputElement>(null);
+  const expiryInputRef = useRef<HTMLInputElement>(null);
+  const lastErrorRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -96,20 +103,61 @@ export function ProductFormPage() {
   function generateInternalCode() {
     const rand = Math.floor(10000 + Math.random() * 90000);
     setBarcode(`INT-${rand}`);
+    if (barcodeError) setBarcodeError(false);
+  }
+
+  function failValidation(
+    setErr: (v: boolean) => void,
+    ref: React.RefObject<HTMLInputElement | null>,
+    message: string
+  ) {
+    setErr(true);
+    setToast(message);
+    lastErrorRef.current = ref.current;
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    ref.current?.focus();
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const trimmedName = name.trim();
-    if (!trimmedName || /^\d+$/.test(trimmedName)) {
-      setNameError(true);
-      setToast(
-        'O nome do produto não pode conter apenas números (use o campo de código de barras para códigos numéricos).'
+    setBarcodeError(false);
+    setNameError(false);
+    setSaleError(false);
+    setExpiryError(false);
+
+    if (!barcode.trim()) {
+      failValidation(
+        setBarcodeError,
+        barcodeInputRef,
+        'Informe o código de barras ou clique em "Gerar Interno".'
       );
-      nameInputRef.current?.focus();
       return;
     }
-    setNameError(false);
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      failValidation(setNameError, nameInputRef, 'Informe o nome completo do produto.');
+      return;
+    }
+    if (/^\d+$/.test(trimmedName)) {
+      failValidation(
+        setNameError,
+        nameInputRef,
+        'O nome do produto não pode conter apenas números (use o campo de código de barras para códigos numéricos).'
+      );
+      return;
+    }
+
+    if (!salePrice || sale <= 0) {
+      failValidation(setSaleError, saleInputRef, 'Informe o preço de venda PDV do produto.');
+      return;
+    }
+
+    if (!expiryDate) {
+      failValidation(setExpiryError, expiryInputRef, 'Informe a data de validade do produto.');
+      return;
+    }
+
     const payload = {
       barcode: barcode.trim(),
       name: trimmedName,
@@ -119,7 +167,7 @@ export function ProductFormPage() {
       salePrice: sale,
       stock: Number(stock) || 0,
       minStock: Number(minStock) || 5,
-      expiryDate: expiryDate || undefined,
+      expiryDate,
       adminOnly,
     };
     try {
@@ -144,13 +192,17 @@ export function ProductFormPage() {
       {toast && (
         <div
           role="alert"
-          className="fixed top-5 right-5 z-[80] max-w-md w-[calc(100%-2.5rem)] sm:w-auto flex items-center gap-3 px-4 py-3.5 rounded-xl bg-error text-white shadow-2xl border border-white/20"
+          onClick={() => lastErrorRef.current?.focus()}
+          className="fixed top-5 right-5 z-[80] max-w-md w-[calc(100%-2.5rem)] sm:w-auto flex items-center gap-3 px-4 py-3.5 rounded-xl bg-error text-white shadow-2xl border border-white/20 cursor-pointer"
         >
           <span className="material-symbols-outlined text-[22px] shrink-0">warning</span>
           <span className="font-label-md font-bold flex-1">{toast}</span>
           <button
             type="button"
-            onClick={() => setToast(null)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setToast(null);
+            }}
             className="p-1 rounded-lg hover:bg-white/20 transition-colors shrink-0"
             aria-label="Fechar aviso"
           >
@@ -174,7 +226,7 @@ export function ProductFormPage() {
         }
       />
 
-      <form onSubmit={handleSubmit} className="space-y-space-lg">
+      <form onSubmit={handleSubmit} noValidate className="space-y-space-lg">
         {/* Pré-visualização no PDV */}
         <section className="bg-surface-container-lowest rounded-xl border border-slate-200/80 shadow-sm p-space-lg flex flex-col md:flex-row items-center justify-between gap-space-md">
           <div>
@@ -217,11 +269,17 @@ export function ProductFormPage() {
                     barcode_scanner
                   </span>
                   <input
+                    ref={barcodeInputRef}
                     id="prod-barcode"
                     required
                     value={barcode}
-                    onChange={(e) => setBarcode(e.target.value)}
-                    className="w-full h-11 pl-10 pr-3 rounded-lg border border-slate-200"
+                    onChange={(e) => {
+                      setBarcode(e.target.value);
+                      if (barcodeError) setBarcodeError(false);
+                    }}
+                    className={`w-full h-11 pl-10 pr-3 rounded-lg border ${
+                      barcodeError ? 'border-error ring-2 ring-error/20 focus:border-error focus:outline-none' : 'border-slate-200'
+                    }`}
                   />
                 </div>
                 <button
@@ -341,14 +399,20 @@ export function ProductFormPage() {
                 Preço de Venda PDV (R$) <span className="text-error">*</span>
               </label>
               <input
+                ref={saleInputRef}
                 id="prod-sale"
                 type="number"
                 step="0.01"
                 required
                 placeholder="0,00"
                 value={salePrice}
-                onChange={(e) => handleSaleChange(e.target.value)}
-                className="w-full h-11 px-3 rounded-lg border border-slate-200"
+                onChange={(e) => {
+                  handleSaleChange(e.target.value);
+                  if (saleError) setSaleError(false);
+                }}
+                className={`w-full h-11 px-3 rounded-lg border ${
+                  saleError ? 'border-error ring-2 ring-error/20 focus:border-error focus:outline-none' : 'border-slate-200'
+                }`}
               />
             </div>
             <div>
@@ -389,13 +453,22 @@ export function ProductFormPage() {
               />
             </div>
             <div>
-              <label htmlFor="prod-exp" className="block font-label-md mb-1">Data de Validade (Opcional)</label>
+              <label htmlFor="prod-exp" className="block font-label-md mb-1">
+                Data de Validade <span className="text-error">*</span>
+              </label>
               <input
+                ref={expiryInputRef}
                 id="prod-exp"
                 type="date"
+                required
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                className="w-full h-11 px-3 rounded-lg border border-slate-200"
+                onChange={(e) => {
+                  setExpiryDate(e.target.value);
+                  if (expiryError) setExpiryError(false);
+                }}
+                className={`w-full h-11 px-3 rounded-lg border ${
+                  expiryError ? 'border-error ring-2 ring-error/20 focus:border-error focus:outline-none' : 'border-slate-200'
+                }`}
               />
             </div>
             <label className="sm:col-span-2 flex items-center gap-2.5 pt-5 font-label-md cursor-pointer">
