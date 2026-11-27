@@ -1,9 +1,43 @@
 const TOKEN_STORAGE_KEY = 'geleia_tab_token';
 const USER_STORAGE_KEY = 'geleia_tab_user';
+const HANDOFF_STORAGE_KEY = 'geleia_tab_handoff';
+
+export function prepareTabSessionHandoff() {
+  try {
+    const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    const user = sessionStorage.getItem(USER_STORAGE_KEY);
+    if (!token || !user) return;
+    localStorage.setItem(
+      HANDOFF_STORAGE_KEY,
+      JSON.stringify({ token, user, expiresAt: Date.now() + 30_000 })
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function consumeTabSessionHandoff(): string | null {
+  try {
+    const raw = localStorage.getItem(HANDOFF_STORAGE_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(HANDOFF_STORAGE_KEY);
+    const parsed = JSON.parse(raw) as { token?: string; user?: string; expiresAt?: number };
+    if (!parsed.token || !parsed.user || !parsed.expiresAt || parsed.expiresAt < Date.now()) {
+      return null;
+    }
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, parsed.token);
+    sessionStorage.setItem(USER_STORAGE_KEY, parsed.user);
+    return parsed.token;
+  } catch {
+    return null;
+  }
+}
 
 export function getAuthToken(): string | null {
   try {
-    return sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    const existing = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    if (existing) return existing;
+    return consumeTabSessionHandoff();
   } catch {
     return null;
   }
@@ -21,6 +55,7 @@ export function clearAuthSession() {
   try {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     sessionStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(HANDOFF_STORAGE_KEY);
   } catch {
     // ignore storage errors
   }

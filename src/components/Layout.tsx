@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useErp } from '../context/ErpContext';
+import { prepareTabSessionHandoff } from '../utils/authFetch';
 
 interface AppNotification {
   id: string;
@@ -188,7 +189,11 @@ export function ErpLayout() {
             href="/pdv"
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={() => {
+              prepareTabSessionHandoff();
+              setMobileMenuOpen(false);
+            }}
+            onAuxClick={() => prepareTabSessionHandoff()}
             className="w-full flex items-center justify-center gap-space-sm py-3 px-space-md rounded-lg bg-tertiary-fixed-dim hover:bg-tertiary-fixed text-tertiary font-label-lg text-label-lg font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
           >
             <span className="material-symbols-outlined text-[20px]">point_of_sale</span>
