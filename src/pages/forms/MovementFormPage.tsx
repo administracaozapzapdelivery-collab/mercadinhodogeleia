@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useErp } from '../../context/ErpContext';
 import { formatBRL } from '../../data/mockData';
@@ -37,10 +37,58 @@ export function MovementFormPage() {
 
   const [type, setType] = useState<StockMovement['type']>('Entrada');
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? '');
+  const [productQuery, setProductQuery] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   const [quantity, setQuantity] = useState(24);
   const [reason, setReason] = useState('NF-e #4589 - Reposição de fornecedor');
 
   const product = products.find((p) => p.id === selectedProductId) ?? products[0];
+  const normalizedQuery = productQuery.trim().toLowerCase();
+  const filteredProducts = normalizedQuery
+    ? products.filter(
+        (p) =>
+          p.name.toLowerCase().includes(normalizedQuery) ||
+          (p.sku ?? '').toLowerCase().includes(normalizedQuery) ||
+          (p.barcode ?? '').toLowerCase().includes(normalizedQuery)
+      )
+    : products;
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  function selectProduct(id: string) {
+    setSelectedProductId(id);
+    setProductQuery('');
+    setDropdownOpen(false);
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      setDropdownOpen(false);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!normalizedQuery) return;
+      const exact =
+        products.find(
+          (p) =>
+            (p.barcode ?? '').toLowerCase() === normalizedQuery ||
+            (p.sku ?? '').toLowerCase() === normalizedQuery
+        ) ?? (filteredProducts.length === 1 ? filteredProducts[0] : undefined);
+      if (exact) {
+        selectProduct(exact.id);
+      }
+    }
+  }
   const delta = type === 'Entrada' ? quantity : -quantity;
   const projectedStock = (product?.stock ?? 0) + delta;
 
@@ -114,20 +162,79 @@ export function MovementFormPage() {
             <h2 className="font-headline-sm font-bold text-primary">
               2. Identificação do Produto <span className="text-error">*</span>
             </h2>
-            <p className="font-body-sm text-on-surface-variant">Selecione o produto ou bipe o EAN</p>
+            <p className="font-body-sm text-on-surface-variant">
+              Pesquise pelo nome, código (SKU) ou código de barras (EAN)
+            </p>
           </div>
 
-          <select
-            value={selectedProductId}
-            onChange={(e) => setSelectedProductId(e.target.value)}
-            className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white"
-          >
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} — EAN: {p.barcode} (Atual: {p.stock} {p.unit})
-              </option>
-            ))}
-          </select>
+          <div ref={searchBoxRef} className="relative">
+            <div className="relative flex items-center">
+              <span className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">
+                search
+              </span>
+              <input
+                type="text"
+                value={productQuery}
+                onFocus={() => setDropdownOpen(true)}
+                onChange={(e) => {
+                  setProductQuery(e.target.value);
+                  setDropdownOpen(true);
+                }}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Buscar por nome, código ou código de barras..."
+                className="w-full h-11 pl-10 pr-9 rounded-lg border border-slate-200 bg-white focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 focus:outline-none"
+              />
+              {productQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductQuery('');
+                    setDropdownOpen(true);
+                  }}
+                  aria-label="Limpar pesquisa"
+                  className="absolute right-2.5 p-1 rounded text-on-surface-variant hover:bg-surface-container"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              )}
+            </div>
+
+            {dropdownOpen && (
+              <div className="absolute z-30 mt-1.5 w-full max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100">
+                {filteredProducts.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-on-surface-variant text-center">
+                    Nenhum produto encontrado para &ldquo;{productQuery.trim()}&rdquo;.
+                  </div>
+                ) : (
+                  filteredProducts.slice(0, 40).map((p) => {
+                    const isSelected = p.id === product?.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => selectProduct(p.id)}
+                        className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-3 transition-colors ${
+                          isSelected
+                            ? 'bg-primary-fixed/40 text-primary'
+                            : 'hover:bg-surface-container-low text-on-surface'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-label-md font-bold truncate">{p.name}</p>
+                          <p className="text-xs text-on-surface-variant truncate">
+                            Cód: {p.sku || '—'} • EAN: {p.barcode || '—'}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant tabular-nums">
+                          Atual: {p.stock} {p.unit}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
 
           {product && (
             <div className="p-4 rounded-xl bg-surface-container-low border border-surface-container flex flex-col sm:flex-row sm:items-center justify-between gap-3">

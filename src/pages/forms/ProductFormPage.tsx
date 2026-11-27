@@ -12,16 +12,17 @@ export function ProductFormPage() {
   const { products, addProduct, updateProduct, categories, suppliers } = useErp();
 
   const [active, setActive] = useState(true);
-  const [barcode, setBarcode] = useState('7896006716114');
+  const [barcode, setBarcode] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState(categories[0]?.name ?? 'Mercearia');
   const [supplier, setSupplier] = useState(suppliers[0]?.name ?? '');
   const [unit, setUnit] = useState<Product['unit']>('un');
-  const [costPrice, setCostPrice] = useState('18.50');
-  const [salePrice, setSalePrice] = useState('28.90');
-  const [stock, setStock] = useState('20');
-  const [minStock, setMinStock] = useState('10');
-  const [expiryDate, setExpiryDate] = useState('2027-06-30');
+  const [costPrice, setCostPrice] = useState('');
+  const [salePrice, setSalePrice] = useState('');
+  const [marginInput, setMarginInput] = useState('');
+  const [stock, setStock] = useState('');
+  const [minStock, setMinStock] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [adminOnly, setAdminOnly] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [nameError, setNameError] = useState(false);
@@ -43,6 +44,11 @@ export function ProductFormPage() {
     setUnit(existing.unit);
     setCostPrice(String(existing.costPrice));
     setSalePrice(String(existing.salePrice));
+    setMarginInput(
+      existing.salePrice > 0
+        ? (((existing.salePrice - existing.costPrice) / existing.salePrice) * 100).toFixed(1)
+        : '0.0'
+    );
     setStock(String(existing.stock));
     setMinStock(String(existing.minStock));
     setExpiryDate(existing.expiryDate ?? '');
@@ -53,6 +59,39 @@ export function ProductFormPage() {
   const sale = Number(salePrice) || 0;
   const profit = sale - cost;
   const marginPct = sale > 0 ? (profit / sale) * 100 : 0;
+
+  function handleCostChange(val: string) {
+    setCostPrice(val);
+    const nextCost = Number(val) || 0;
+    if (sale > 0) {
+      setMarginInput((((sale - nextCost) / sale) * 100).toFixed(1));
+    } else {
+      setMarginInput('0.0');
+    }
+  }
+
+  function handleSaleChange(val: string) {
+    setSalePrice(val);
+    const nextSale = Number(val) || 0;
+    const currentMargin = Number(marginInput) || 0;
+    if ((!costPrice || Number(costPrice) === 0) && currentMargin > 0 && nextSale > 0) {
+      const generatedCost = Math.max(0, nextSale * (1 - currentMargin / 100));
+      setCostPrice(generatedCost.toFixed(2));
+    } else if (nextSale > 0) {
+      setMarginInput((((nextSale - cost) / nextSale) * 100).toFixed(1));
+    } else {
+      setMarginInput('0.0');
+    }
+  }
+
+  function handleMarginChange(val: string) {
+    setMarginInput(val);
+    const nextMargin = Number(val);
+    if (!Number.isNaN(nextMargin) && sale > 0) {
+      const generatedCost = Math.max(0, sale * (1 - nextMargin / 100));
+      setCostPrice(generatedCost.toFixed(2));
+    }
+  }
 
   function generateInternalCode() {
     const rand = Math.floor(10000 + Math.random() * 90000);
@@ -147,7 +186,7 @@ export function ProductFormPage() {
           <div className="w-full md:w-72 p-4 rounded-xl border border-primary/20 bg-surface-container-low">
             <span className="font-label-sm uppercase text-secondary">{category}</span>
             <p className="font-label-lg font-bold text-on-surface mt-0.5 truncate">
-              {name.trim() || 'Arroz Branco Camil 5kg'}
+              {name.trim() || 'Nome do produto'}
             </p>
             <div className="flex items-baseline justify-between mt-2">
               <span className="font-headline-sm font-extrabold text-primary tabular-nums">
@@ -291,8 +330,9 @@ export function ProductFormPage() {
                 id="prod-cost"
                 type="number"
                 step="0.01"
+                placeholder="0,00"
                 value={costPrice}
-                onChange={(e) => setCostPrice(e.target.value)}
+                onChange={(e) => handleCostChange(e.target.value)}
                 className="w-full h-11 px-3 rounded-lg border border-slate-200"
               />
             </div>
@@ -305,8 +345,24 @@ export function ProductFormPage() {
                 type="number"
                 step="0.01"
                 required
+                placeholder="0,00"
                 value={salePrice}
-                onChange={(e) => setSalePrice(e.target.value)}
+                onChange={(e) => handleSaleChange(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-slate-200"
+              />
+            </div>
+            <div>
+              <label htmlFor="prod-margin" className="block font-label-md mb-1">
+                Margem Estimada (%)
+              </label>
+              <input
+                id="prod-margin"
+                type="number"
+                step="0.1"
+                max="100"
+                placeholder="0,0"
+                value={marginInput}
+                onChange={(e) => handleMarginChange(e.target.value)}
                 className="w-full h-11 px-3 rounded-lg border border-slate-200"
               />
             </div>
@@ -315,6 +371,7 @@ export function ProductFormPage() {
               <input
                 id="prod-stock"
                 type="number"
+                placeholder="0"
                 value={stock}
                 onChange={(e) => setStock(e.target.value)}
                 className="w-full h-11 px-3 rounded-lg border border-slate-200"
@@ -325,12 +382,13 @@ export function ProductFormPage() {
               <input
                 id="prod-min"
                 type="number"
+                placeholder="5"
                 value={minStock}
                 onChange={(e) => setMinStock(e.target.value)}
                 className="w-full h-11 px-3 rounded-lg border border-slate-200"
               />
             </div>
-            <div className="sm:col-span-2">
+            <div>
               <label htmlFor="prod-exp" className="block font-label-md mb-1">Data de Validade (Opcional)</label>
               <input
                 id="prod-exp"
